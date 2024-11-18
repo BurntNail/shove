@@ -116,6 +116,8 @@ impl State {
             self.cache.insert(path, (contents, content_type)).await;
         }
 
+        *self.not_found.write().await = not_found;
+
         info!("Finished reloading cache");
 
         Ok(())
