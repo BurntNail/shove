@@ -4,6 +4,7 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use new_mime_guess::MimeGuess;
 use s3::Bucket;
 use std::{collections::HashMap, path::PathBuf};
+use std::collections::HashSet;
 use tokio::{fs::File, io::AsyncReadExt};
 use walkdir::WalkDir;
 
@@ -20,7 +21,7 @@ pub async fn upload_dir_to_bucket(
     existing: Option<UploadData>,
 ) -> color_eyre::Result<()> {
     async fn read_file(pb: PathBuf) -> color_eyre::Result<Entry> {
-        info!(?pb, "Reading file");
+        trace!(?pb, "Reading file");
 
         let contents: Vec<u8> = {
             let mut file = File::open(&pb).await?;
@@ -72,20 +73,24 @@ pub async fn upload_dir_to_bucket(
         Ok(())
     }
 
+    let UploadData {
+        entries: existing_entries,
+    } = existing.unwrap_or_default();
+
+    info!("Reading files");
     let mut futures: FuturesUnordered<_> = WalkDir::new(dir)
         .into_iter()
         .filter_map(|x| x.ok().filter(|x| x.path().is_file()))
         .map(|item| read_file(item.path().to_path_buf()))
         .collect();
-    info!("Read all files");
-    let UploadData {
-        entries: existing_entries,
-    } = existing.unwrap_or_default();
 
     let mut to_write = vec![];
+    let mut to_delete: HashSet<_> = existing_entries.keys().collect();
     let mut entries = HashMap::new();
     while let Some(entry) = futures.next().await {
         let entry = entry?;
+
+        to_delete.remove(&entry.pb);
 
         match existing_entries.get(&entry.pb) {
             None => {
@@ -97,11 +102,13 @@ pub async fn upload_dir_to_bucket(
                 if x != &entry.hash {
                     to_write.push(entry);
                 } else {
-                    info!(pb=?entry.pb, "Skipping as already found");
+                    trace!(pb=?entry.pb, "Skipping as already found");
                 }
             }
         }
     }
+
+    info!("Read all files");
 
     let upload_data = UploadData { entries };
     let json_upload_data = serde_json::to_vec(&upload_data)?;
@@ -119,7 +126,16 @@ pub async fn upload_dir_to_bucket(
         res?;
     }
 
-    info!("All uploaded to S3");
+    info!("Uploaded files to S3");
+
+    for pb in to_delete {
+        if let Some(path) = pb.to_str() {
+            info!(?path, "Deleting old file");
+            bucket.delete_object(path).await?;
+        }
+    }
+
+    info!("Deleted old files from S3");
 
     Ok(())
 }
