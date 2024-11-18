@@ -48,8 +48,9 @@ EOF
 FROM debian:bullseye-slim AS final
 LABEL org.opencontainers.image.source=https://github.com/BurntNail/souris
 
-RUN apt update && apt install -y ca-certificates
+RUN apt update && apt install -y --no-install-recommends ca-certificates
 RUN update-ca-certificates
+RUN rm -rf /var/lib/apt && rm -rf /var/lib/dpkg && rm -rf /var/lib/cache && rm -rf /var/lib/log
 
 # Create a non-privileged user that the app will run under.
 # See https://docs.docker.com/develop/develop-images/dockerfile_best-practices/   #user
