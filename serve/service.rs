@@ -22,49 +22,30 @@ impl Service<Request<Incoming>> for ServeService {
         let state = self.state.clone();
 
         Box::pin(async move {
-            let raw_path = req.uri().path();
-            let path = if !raw_path.is_empty() {
-                let root = state.file_root_dir().await;
-                let mut path = format!("{}{}", root.to_string_lossy(), raw_path);
+            let path = req.uri().path();
+            let mut path = path.to_string();
+            if path.is_empty() || path.as_bytes()[path.as_bytes().len() - 1] == b'/' {
+                path.push_str("index.html");
+            }
 
-                let bytes = path.as_bytes();
-                if bytes[bytes.len() - 1] == b'/' {
-                    path.push_str("index.html");
-                }
-
-                path
-            } else {
-                "index.html".to_string()
-            };
-
-            trace!(?path, ?raw_path, "Serving");
+            trace!(?path, "Serving");
 
             match state.get(&path).await {
-                Some((content, content_type)) => {
+                Some((content, content_type, sc)) => {
                     let rsp = Response::builder()
-                        .status(StatusCode::OK)
+                        .status(sc)
                         .header("Content-Type", content_type)
                         .body(Full::new(Bytes::from(content)))?;
 
                     Ok(rsp)
                 }
-                None => match state.not_found().await {
-                    Some((content, content_type)) => {
-                        let rsp = Response::builder()
-                            .status(StatusCode::NOT_FOUND)
-                            .header("Content-Type", content_type)
-                            .body(Full::new(Bytes::from(content)))?;
+                None => {
+                    let rsp = Response::builder()
+                        .status(StatusCode::NOT_FOUND)
+                        .body(Full::new(Bytes::new()))?;
 
-                        Ok(rsp)
-                    }
-                    None => {
-                        let rsp = Response::builder()
-                            .status(StatusCode::NOT_FOUND)
-                            .body(Full::new(Bytes::new()))?;
-
-                        Ok(rsp)
-                    }
-                },
+                    Ok(rsp)
+                }
             }
         })
     }

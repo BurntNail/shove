@@ -6,8 +6,8 @@ use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
 use moka::future::{Cache, CacheBuilder};
 use s3::Bucket;
-use std::path::PathBuf;
 use std::sync::Arc;
+use hyper::StatusCode;
 use tokio::sync::RwLock;
 
 #[derive(Clone, Debug)]
@@ -15,7 +15,6 @@ pub struct State {
     bucket: Box<Bucket>,
     upload_data: Arc<RwLock<UploadData>>,
     cache: Cache<String, (Vec<u8>, String)>,
-    not_found: Arc<RwLock<Option<(Vec<u8>, String)>>>,
 }
 
 impl State {
@@ -44,33 +43,35 @@ impl State {
 
         let cache = CacheBuilder::new(1024).support_invalidation_closures().build();
 
-        let mut read_files: FuturesUnordered<_> = upload_data
-            .entries
-            .keys()
-            .map(|pb| Self::read_file_from_s3(pb.clone(), &bucket))
-            .collect();
+        let task_cache = cache.clone();
+        let task_bucket = bucket.clone();
+        let task_upload_data = upload_data.clone();
+        tokio::task::spawn(async move {
+            let mut read_files: FuturesUnordered<_> = task_upload_data
+                .entries
+                .keys()
+                .map(|pb| Self::read_file_from_s3(pb.clone(), &task_bucket))
+                .collect();
 
-        let mut not_found = None;
-
-        while let Some(res) = read_files.next().await {
-            let (contents, content_type, path) = res?;
-
-            if path.contains("404.html") {
-                not_found = Some((contents.clone(), content_type.clone()));
+            while let Some(res) = read_files.next().await {
+                match res {
+                    Ok((contents, content_type, path)) => {
+                        info!(?path, "initial load adding to cache");
+                        task_cache.insert(path, (contents, content_type)).await;
+                    },
+                    Err(e) => {
+                        warn!(?e, "Error reading file from S3")
+                    }
+                }
             }
 
-            cache.insert(path, (contents, content_type)).await;
-        }
-
-        info!("Read files from S3");
-
-        drop(read_files);
+            info!("Read files from S3");
+        });
 
         Ok(Some(Self {
             bucket,
             upload_data: Arc::new(RwLock::new(upload_data)),
             cache,
-            not_found: Arc::new(RwLock::new(not_found)),
         }))
     }
 
@@ -91,56 +92,74 @@ impl State {
 
         *self.upload_data.write().await = new_upload_data.clone();
 
-        let cloned_entries = new_upload_data.entries.clone();
-        self.cache.invalidate_entries_if(move |key, _value| {
-            !cloned_entries.contains_key(key)
-        })?;
-
-        let mut read_files: FuturesUnordered<_> = new_upload_data
-            .entries
-            .keys()
-            .map(|pb| Self::read_file_from_s3(pb.to_string(), &self.bucket))
-            .collect();
-
-        let mut not_found = None;
-
-        while let Some(res) = read_files.next().await {
-            let (contents, content_type, path) = res?;
-
-            if path.contains("404.html") {
-                not_found = Some((contents.clone(), content_type.clone()));
-            }
-
-            self.cache.insert(path, (contents, content_type)).await;
-        }
-
-        *self.not_found.write().await = not_found;
-
-        info!("Finished reloading cache");
-
+        self.cache.invalidate_all();
+        //TODO: actual work :)
         Ok(())
+
+
+        //
+        // let cloned_entries = new_upload_data.entries.clone();
+        // self.cache.invalidate_entries_if(move |key, _value| {
+        //     !cloned_entries.contains_key(key)
+        // })?;
+        //
+        // let mut read_files: FuturesUnordered<_> = new_upload_data
+        //     .entries
+        //     .keys()
+        //     .map(|pb| Self::read_file_from_s3(pb.to_string(), &self.bucket))
+        //     .collect();
+        //
+        // let mut not_found = None;
+        //
+        // while let Some(res) = read_files.next().await {
+        //     let (contents, content_type, path) = res?;
+        //
+        //     if path.contains("404.html") {
+        //         not_found = Some((contents.clone(), content_type.clone()));
+        //     }
+        //
+        //     self.cache.insert(path, (contents, content_type)).await;
+        // }
+        //
+        // *self.not_found.write().await = not_found;
+        //
+        // info!("Finished reloading cache");
+        //
+        // Ok(())
     }
 
-    pub async fn get(&self, path: &str) -> Option<(Vec<u8>, String)> {
-        if let Some(out) = self.cache.get(path).await {
-            return Some(out);
+    pub async fn get(&self, path: &str) -> Option<(Vec<u8>, String, StatusCode)> {
+        let root = self.upload_data.read().await.clone().root;
+        let path = format!("{root}{path}");
+
+        let not_found = || async {
+            let (content, content_type) = self.cache.get(&format!("{root:?}404.html")).await?;
+            Some((content, content_type, StatusCode::NOT_FOUND))
+        };
+
+        if let Some((c, ct)) = self.cache.get(&path).await {
+            return Some((c, ct, StatusCode::OK));
         }
 
-        match self.upload_data.read().await.entries.get(path) {
-            None => {
+        match self.upload_data.read().await.entries.get(&path) {
+            Some(_hash) => {
+                match Self::read_file_from_s3(path.clone(), &self.bucket).await {
+                    Ok((bytes, content_type, path)) => {
+                        info!(?path, "Adding to cache");
+                        self.cache.insert(path, (bytes.clone(), content_type.clone())).await;
+                        Some((bytes, content_type, StatusCode::OK))
+                    },
+                    Err(e) => {
+                        warn!(?e, "Error getting file from S3, removing from local upload data");
+                        self.upload_data.write().await.entries.remove(&path);
 
+                        not_found().await
+                    }
+                }
             }
-            Some(_) => {}
+            None => {
+                not_found().await
+            }
         }
-
-        todo!()
-    }
-
-    pub async fn not_found(&self) -> Option<(Vec<u8>, String)> {
-        self.not_found.read().await.clone()
-    }
-
-    pub async fn file_root_dir(&self) -> PathBuf {
-        self.upload_data.read().await.clone().root
     }
 }

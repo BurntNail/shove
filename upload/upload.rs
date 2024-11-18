@@ -131,7 +131,7 @@ pub async fn upload_dir_to_bucket(
 
     let upload_data = UploadData {
         entries,
-        root: PathBuf::from(dir),
+        root: dir.to_string(),
     };
     let json_upload_data = serde_json::to_vec(&upload_data)?;
     bucket

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 pub mod aws;
@@ -11,7 +11,7 @@ extern crate tracing;
 pub struct UploadData {
     ///path to hash
     pub entries: HashMap<String, String>,
-    pub root: PathBuf,
+    pub root: String,
 }
 
 pub fn setup() {
