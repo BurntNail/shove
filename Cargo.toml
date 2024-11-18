@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+axum = "0.7.9"
 blake2 = "0.10.6"
 color-eyre = "0.6.3"
 dotenvy = "0.15.7"
