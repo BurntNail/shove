@@ -37,6 +37,7 @@ pub async fn upload_dir_to_bucket(
                     }
                 }
             }
+
             contents
         };
 
@@ -46,6 +47,8 @@ pub async fn upload_dir_to_bucket(
         hasher.update(&contents);
         let hash = hasher.finalize().to_vec();
         let hash: String = hash.into_iter().map(|x| format!("{x:x}")).collect();
+
+        info!(len=?contents.len(), ?pb, "Read file");
 
         Ok(Entry {
             pb,
@@ -68,10 +71,12 @@ pub async fn upload_dir_to_bucket(
             error!(?pb, "unable to get string repr of path");
             return Ok(());
         };
-        info!(?path, ?content_type, "Uploading to S3");
-        bucket
+        let rsp = bucket
             .put_object_with_content_type(path, &contents, content_type.essence_str())
             .await?;
+
+        info!(?path, ?content_type, code=%rsp.status_code(), "Uploaded to S3");
+
         Ok(())
     }
 
@@ -85,6 +90,7 @@ pub async fn upload_dir_to_bucket(
         .filter_map(|x| x.ok().filter(|x| x.path().is_file()))
         .map(|item| read_file(item.path().to_path_buf()))
         .collect();
+
 
     let mut to_write = vec![];
     let mut to_delete: HashSet<_> = existing_entries.keys().collect();
@@ -104,7 +110,7 @@ pub async fn upload_dir_to_bucket(
                 if x != &entry.hash {
                     to_write.push(entry);
                 } else {
-                    trace!(pb=?entry.pb, "Skipping as already found");
+                    trace!(pb=?entry.pb, "Skipping upload");
                 }
             }
         }
