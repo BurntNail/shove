@@ -32,7 +32,11 @@ pub fn setup() {
                 }
             }
         }
-        dotenvy::dotenv().unwrap();
+    }
+
+    match dotenvy::dotenv() {
+        Ok(file) => info!(?file, "Found env vars"),
+        Err(e) => warn!(?e, "Error finding env vars"),
     }
 
     tracing_subscriber::registry()
