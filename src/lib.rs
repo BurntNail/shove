@@ -7,20 +7,13 @@ pub mod aws;
 #[macro_use]
 extern crate tracing;
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct UploadData {
     ///path to hash
     pub entries: HashMap<PathBuf, String>,
 }
 
 pub fn setup() {
-    dotenvy::dotenv().unwrap();
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .with(EnvFilter::from_default_env())
-        .init();
-    color_eyre::install().expect("unable to install color-eyre");
-
     if cfg!(debug_assertions) {
         for (key, value) in &[
             ("RUST_SPANTRACE", "full"),
@@ -39,4 +32,11 @@ pub fn setup() {
             }
         }
     }
+
+    dotenvy::dotenv().unwrap();
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .init();
+    color_eyre::install().expect("unable to install color-eyre");
 }
