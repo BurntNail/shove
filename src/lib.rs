@@ -32,9 +32,10 @@ pub fn setup() {
                 }
             }
         }
+        dotenvy::dotenv().unwrap();
     }
 
-    dotenvy::dotenv().unwrap();
+
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
         .with(EnvFilter::from_default_env())
