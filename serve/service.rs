@@ -6,7 +6,7 @@ use hyper::{
     service::Service,
     Request, Response, StatusCode,
 };
-use std::{future::Future, pin::Pin};
+use std::{future::Future, path::PathBuf, pin::Pin};
 
 #[derive(Debug, Clone)]
 pub struct ServeService {
@@ -24,7 +24,14 @@ impl Service<Request<Incoming>> for ServeService {
         Box::pin(async move {
             let path = req.uri().path();
             let mut path = path.to_string();
-            if path.is_empty() || path.as_bytes()[path.as_bytes().len() - 1] == b'/' {
+
+            if PathBuf::from(&path)
+                .extension()
+                .is_none_or(|x| x.is_empty())
+            {
+                if path.as_bytes()[path.as_bytes().len() - 1] != b'/' {
+                    path.push('/');
+                }
                 path.push_str("index.html");
             }
 

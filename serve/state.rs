@@ -66,7 +66,7 @@ impl State {
             while let Some(res) = read_files.next().await {
                 match res {
                     Ok((contents, content_type, path)) => {
-                        info!(?path, "initial load adding to cache");
+                        trace!(?path, "initial load adding to cache");
                         task_cache.insert(path, (contents, content_type)).await;
                     }
                     Err(e) => {
