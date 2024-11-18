@@ -1,21 +1,21 @@
-use std::path::PathBuf;
+use crate::{
+    aws::{get_bucket, get_upload_data},
+    upload::upload_dir_to_bucket,
+};
 use serde::{Deserialize, Serialize};
-use tracing_subscriber::EnvFilter;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-use crate::aws::{get_bucket, get_upload_data};
-use crate::upload::upload_dir_to_bucket;
+use std::{collections::HashMap, path::PathBuf};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-mod upload;
 mod aws;
+mod upload;
 
 #[macro_use]
 extern crate tracing;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct UploadData {
-    root: PathBuf,
-    hash: String,
+    ///path to hash
+    entries: HashMap<PathBuf, String>,
 }
 
 fn setup() {
@@ -41,7 +41,6 @@ fn setup() {
         }
     }
 }
-
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {

@@ -146,6 +146,7 @@ dependencies = [
  "blake2",
  "color-eyre",
  "dotenvy",
+ "futures",
  "mime",
  "moka",
  "new_mime_guess",
