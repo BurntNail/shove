@@ -1,11 +1,12 @@
-use std::path::PathBuf;
+use bloggthingie::{
+    aws::{get_bucket, get_upload_data},
+    UploadData,
+};
 use color_eyre::eyre::bail;
-use futures::stream::FuturesUnordered;
-use futures::StreamExt;
+use futures::{stream::FuturesUnordered, StreamExt};
 use moka::future::Cache;
 use s3::Bucket;
-use bloggthingie::aws::{get_bucket, get_upload_data};
-use bloggthingie::UploadData;
+use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
 pub struct State {
@@ -16,8 +17,18 @@ pub struct State {
 }
 
 impl State {
-    pub async fn new () -> color_eyre::Result<Option<Self>> {
-        async fn read_file (path: String, bucket: &Box<Bucket>) -> color_eyre::Result<(Vec<u8>, String, String)> {
+    pub async fn reload(&self) -> color_eyre::Result<()> {
+        info!("Checking for reload");
+        Ok(())
+    }
+}
+
+impl State {
+    pub async fn new() -> color_eyre::Result<Option<Self>> {
+        async fn read_file(
+            path: String,
+            bucket: &Box<Bucket>,
+        ) -> color_eyre::Result<(Vec<u8>, String, String)> {
             let contents = bucket.get_object(&path).await?;
             let headers = contents.headers();
 
@@ -37,8 +48,12 @@ impl State {
         info!("Got bucket & upload data");
 
         let cache = Cache::new(1024);
-        let mut read_files: FuturesUnordered<_> = upload_data.entries.keys().filter_map(|x| x.to_str())
-            .map(|pb| read_file(pb.to_string(), &bucket)).collect();
+        let mut read_files: FuturesUnordered<_> = upload_data
+            .entries
+            .keys()
+            .filter_map(|x| x.to_str())
+            .map(|pb| read_file(pb.to_string(), &bucket))
+            .collect();
 
         let mut not_found = None;
 
@@ -56,24 +71,23 @@ impl State {
 
         drop(read_files);
 
-
         Ok(Some(Self {
             bucket,
             upload_data,
             cache,
-            not_found
+            not_found,
         }))
     }
 
-    pub async fn get (&self, path: &str) -> Option<(Vec<u8>, String)> {
+    pub async fn get(&self, path: &str) -> Option<(Vec<u8>, String)> {
         self.cache.get(path).await
     }
 
-    pub fn not_found (&self) -> Option<(Vec<u8>, String)> {
+    pub fn not_found(&self) -> Option<(Vec<u8>, String)> {
         self.not_found.clone()
     }
 
-    pub fn file_root_dir (&self) -> PathBuf {
+    pub fn file_root_dir(&self) -> PathBuf {
         self.upload_data.root.clone()
     }
 }

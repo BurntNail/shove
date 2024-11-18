@@ -1,15 +1,16 @@
-use std::future::Future;
-use std::path::PathBuf;
-use std::pin::Pin;
-use http_body_util::Full;
-use hyper::body::{Bytes, Incoming};
-use hyper::{http, Request, Response, StatusCode};
-use hyper::service::Service;
 use crate::state::State;
+use http_body_util::Full;
+use hyper::{
+    body::{Bytes, Incoming},
+    http,
+    service::Service,
+    Request, Response, StatusCode,
+};
+use std::{future::Future, pin::Pin};
 
 #[derive(Debug, Clone)]
 pub struct ServeService {
-    pub(crate) state: State
+    pub(crate) state: State,
 }
 
 impl Service<Request<Incoming>> for ServeService {
@@ -19,14 +20,22 @@ impl Service<Request<Incoming>> for ServeService {
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
         let state = self.state.clone();
-        let mut path = format!("{}{}", state.file_root_dir().to_string_lossy(), req.uri().path());
 
-        let bytes = path.as_bytes();
-        if bytes[bytes.len() - 1] == b'/' {
-            path.push_str("index.html");
-        }
+        let raw_path = req.uri().path();
+        let path = if !raw_path.is_empty() {
+            let mut path = format!("{}{}", state.file_root_dir().to_string_lossy(), raw_path);
 
-        info!(?path, "Serving");
+            let bytes = path.as_bytes();
+            if bytes[bytes.len() - 1] == b'/' {
+                path.push_str("index.html");
+            }
+
+            path
+        } else {
+            "index.html".to_string()
+        };
+
+        info!(?path, ?raw_path, "Serving");
 
         Box::pin(async move {
             match state.get(&path).await {
@@ -37,7 +46,7 @@ impl Service<Request<Incoming>> for ServeService {
                         .body(Full::new(Bytes::from(content)))?;
 
                     Ok(rsp)
-                },
+                }
                 None => match state.not_found() {
                     Some((content, content_type)) => {
                         let rsp = Response::builder()
@@ -46,7 +55,7 @@ impl Service<Request<Incoming>> for ServeService {
                             .body(Full::new(Bytes::from(content)))?;
 
                         Ok(rsp)
-                    },
+                    }
                     None => {
                         let rsp = Response::builder()
                             .status(StatusCode::NOT_FOUND)
@@ -54,7 +63,7 @@ impl Service<Request<Incoming>> for ServeService {
 
                         Ok(rsp)
                     }
-                }
+                },
             }
         })
     }
