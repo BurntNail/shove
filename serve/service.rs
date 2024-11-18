@@ -18,13 +18,11 @@ impl Service<Request<Incoming>> for ServeService {
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
-        fn mk_response(s: String) -> Result<Response<Full<Bytes>>, hyper::Error> {
-            Ok(Response::builder().body(Full::new(Bytes::from(s))).unwrap())
-        }
-
         let state = self.state.clone();
         let mut path = format!("{}{}", state.file_root_dir().to_string_lossy(), req.uri().path());
-        if PathBuf::from(&path).is_dir() {
+
+        let bytes = path.as_bytes();
+        if bytes[bytes.len() - 1] == b'/' {
             path.push_str("index.html");
         }
 
