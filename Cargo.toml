@@ -18,3 +18,13 @@ tokio = { version = "1.41.1", features = ["full"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 walkdir = "2.5.0"
+
+
+[[bin]]
+name = "btupload"
+path = "upload/main.rs"
+
+
+[[bin]]
+name = "btserve"
+path = "serve/main.rs"
