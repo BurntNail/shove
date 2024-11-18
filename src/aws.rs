@@ -12,8 +12,7 @@ pub fn get_bucket() -> Box<Bucket> {
         region: "auto".to_owned(),
         endpoint,
     };
-    let bucket = Bucket::new(&bucket_name, region, aws_creds).unwrap();
-    bucket
+    Bucket::new(&bucket_name, region, aws_creds).unwrap()
 }
 
 pub fn get_aws_creds() -> Credentials {
@@ -24,12 +23,10 @@ pub fn get_aws_creds() -> Credentials {
     Credentials::new(Some(&access_key), Some(&secret_key), None, None, None).unwrap()
 }
 
-pub async fn get_upload_data(bucket: &Box<Bucket>) -> color_eyre::Result<Option<UploadData>> {
+pub async fn get_upload_data(bucket: &Bucket) -> color_eyre::Result<Option<UploadData>> {
     let data = bucket.get_object(UPLOAD_DATA_LOCATION).await;
     match data {
-        Ok(data) => Ok(Some(
-            serde_json::from_slice(data.as_slice())?,
-        )),
+        Ok(data) => Ok(Some(serde_json::from_slice(data.as_slice())?)),
         Err(e) => match e {
             S3Error::HttpFailWithBody(404, _) => Ok(None),
             _ => Err(e.into()),

@@ -1,13 +1,14 @@
 use blake2::{Blake2b512, Digest};
 use bloggthingie::{aws::UPLOAD_DATA_LOCATION, UploadData};
+use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
 use new_mime_guess::MimeGuess;
 use s3::Bucket;
 use std::{
     collections::{HashMap, HashSet},
+    fmt::Write,
     path::PathBuf,
 };
-use color_eyre::eyre::bail;
 use tokio::{fs::File, io::AsyncReadExt};
 use walkdir::WalkDir;
 
@@ -20,7 +21,7 @@ struct Entry {
 
 pub async fn upload_dir_to_bucket(
     dir: &str,
-    bucket: &Box<Bucket>,
+    bucket: &Bucket,
     existing: Option<UploadData>,
 ) -> color_eyre::Result<()> {
     async fn read_file(pb: PathBuf) -> color_eyre::Result<Entry> {
@@ -51,7 +52,10 @@ pub async fn upload_dir_to_bucket(
         let mut hasher = Blake2b512::new();
         hasher.update(&contents);
         let hash = hasher.finalize().to_vec();
-        let hash: String = hash.into_iter().map(|x| format!("{x:x}")).collect();
+        let hash = hash.into_iter().fold(String::new(), |mut acc, x| {
+            write!(&mut acc, "{x:x}").expect("unable to write to string to create hash");
+            acc
+        });
 
         info!(len=?contents.len(), ?pb, "Read file");
 
@@ -121,7 +125,7 @@ pub async fn upload_dir_to_bucket(
 
     let mut futures: FuturesUnordered<_> = to_write
         .into_iter()
-        .map(|e| write_file_to_bucket(&bucket, e))
+        .map(|e| write_file_to_bucket(bucket, e))
         .collect();
     while let Some(res) = futures.next().await {
         res?;
@@ -139,7 +143,6 @@ pub async fn upload_dir_to_bucket(
         .await?;
 
     info!("Uploaded object data to S3");
-
 
     for path in to_delete {
         info!(?path, "Deleting old file");

@@ -1,14 +1,13 @@
-use std::collections::HashSet;
 use bloggthingie::{
     aws::{get_bucket, get_upload_data},
     UploadData,
 };
 use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
+use hyper::StatusCode;
 use moka::future::{Cache, CacheBuilder};
 use s3::Bucket;
-use std::sync::Arc;
-use hyper::StatusCode;
+use std::{collections::HashSet, sync::Arc};
 use tokio::sync::RwLock;
 
 #[derive(Clone, Debug)]
@@ -21,7 +20,7 @@ pub struct State {
 impl State {
     async fn read_file_from_s3(
         path: String,
-        bucket: &Box<Bucket>,
+        bucket: &Bucket,
     ) -> color_eyre::Result<(Vec<u8>, String, String)> {
         let contents = bucket.get_object(&path).await?;
         let headers = contents.headers();
@@ -42,14 +41,16 @@ impl State {
         };
         info!("Got bucket & upload data");
 
-        let cache = CacheBuilder::new(1024).support_invalidation_closures().build();
+        let cache = CacheBuilder::new(1024)
+            .support_invalidation_closures()
+            .build();
 
         match Self::read_file_from_s3(format!("{}/404.html", &upload_data.root), &bucket).await {
             Ok((contents, content_type, path)) => {
                 info!("Adding 404 path to cache");
                 cache.insert(path, (contents, content_type)).await;
             }
-            Err(e) => warn!(?e, "Error getting 404 page from S3")
+            Err(e) => warn!(?e, "Error getting 404 page from S3"),
         }
 
         let task_cache = cache.clone();
@@ -67,7 +68,7 @@ impl State {
                     Ok((contents, content_type, path)) => {
                         info!(?path, "initial load adding to cache");
                         task_cache.insert(path, (contents, content_type)).await;
-                    },
+                    }
                     Err(e) => {
                         warn!(?e, "Error reading file from S3")
                     }
@@ -101,20 +102,24 @@ impl State {
 
         *self.upload_data.write().await = new_upload_data.clone();
 
-
         let mut to_be_updated: HashSet<String> = new_upload_data.entries.keys().cloned().collect();
         let mut to_be_removed: Vec<String> = vec![];
 
         for (old_entry, old_hash) in old_upload_data.entries {
             match new_upload_data.entries.get(&old_entry) {
-                Some(new_hash) => if &old_hash == new_hash {
-                    to_be_updated.remove(&old_entry);
+                Some(new_hash) => {
+                    if &old_hash == new_hash {
+                        to_be_updated.remove(&old_entry);
+                    }
                 }
                 None => to_be_removed.push(old_entry),
             }
         }
 
-        if let Err(e) = self.cache.invalidate_entries_if(move |entry, _| to_be_removed.contains(entry)) {
+        if let Err(e) = self
+            .cache
+            .invalidate_entries_if(move |entry, _| to_be_removed.contains(entry))
+        {
             warn!(?e, "Error invalidating old entries")
         }
 
@@ -131,7 +136,7 @@ impl State {
                     Ok((contents, content_type, path)) => {
                         info!(?path, "file changed, updating");
                         task_cache.insert(path, (contents, content_type)).await;
-                    },
+                    }
                     Err(e) => {
                         warn!(?e, "Error updating file from S3")
                     }
@@ -140,8 +145,6 @@ impl State {
 
             info!("Updated cache from S3");
         });
-
-
 
         Ok(())
     }
@@ -160,24 +163,25 @@ impl State {
         }
 
         match self.upload_data.read().await.entries.get(&path) {
-            Some(_hash) => {
-                match Self::read_file_from_s3(path.clone(), &self.bucket).await {
-                    Ok((bytes, content_type, path)) => {
-                        info!(?path, "Adding to cache");
-                        self.cache.insert(path, (bytes.clone(), content_type.clone())).await;
-                        Some((bytes, content_type, StatusCode::OK))
-                    },
-                    Err(e) => {
-                        warn!(?e, "Error getting file from S3, removing from local upload data");
-                        self.upload_data.write().await.entries.remove(&path);
-
-                        not_found().await
-                    }
+            Some(_hash) => match Self::read_file_from_s3(path.clone(), &self.bucket).await {
+                Ok((bytes, content_type, path)) => {
+                    info!(?path, "Adding to cache");
+                    self.cache
+                        .insert(path, (bytes.clone(), content_type.clone()))
+                        .await;
+                    Some((bytes, content_type, StatusCode::OK))
                 }
-            }
-            None => {
-                not_found().await
-            }
+                Err(e) => {
+                    warn!(
+                        ?e,
+                        "Error getting file from S3, removing from local upload data"
+                    );
+                    self.upload_data.write().await.entries.remove(&path);
+
+                    not_found().await
+                }
+            },
+            None => not_found().await,
         }
     }
 }
