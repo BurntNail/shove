@@ -10,7 +10,7 @@ extern crate tracing;
 #[derive(Serialize, Deserialize, Default, Debug, Clone, Eq, PartialEq)]
 pub struct UploadData {
     ///path to hash
-    pub entries: HashMap<PathBuf, String>,
+    pub entries: HashMap<String, String>,
     pub root: PathBuf,
 }
 

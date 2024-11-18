@@ -19,7 +19,7 @@ pub struct State {
 }
 
 impl State {
-    async fn read_file(
+    async fn read_file_from_s3(
         path: String,
         bucket: &Box<Bucket>,
     ) -> color_eyre::Result<(Vec<u8>, String, String)> {
@@ -47,8 +47,7 @@ impl State {
         let mut read_files: FuturesUnordered<_> = upload_data
             .entries
             .keys()
-            .filter_map(|x| x.to_str())
-            .map(|pb| Self::read_file(pb.to_string(), &bucket))
+            .map(|pb| Self::read_file_from_s3(pb.clone(), &bucket))
             .collect();
 
         let mut not_found = None;
@@ -94,14 +93,13 @@ impl State {
 
         let cloned_entries = new_upload_data.entries.clone();
         self.cache.invalidate_entries_if(move |key, _value| {
-            !cloned_entries.contains_key(&PathBuf::from(key))
+            !cloned_entries.contains_key(key)
         })?;
 
         let mut read_files: FuturesUnordered<_> = new_upload_data
             .entries
             .keys()
-            .filter_map(|x| x.to_str())
-            .map(|pb| Self::read_file(pb.to_string(), &self.bucket))
+            .map(|pb| Self::read_file_from_s3(pb.to_string(), &self.bucket))
             .collect();
 
         let mut not_found = None;
@@ -124,7 +122,18 @@ impl State {
     }
 
     pub async fn get(&self, path: &str) -> Option<(Vec<u8>, String)> {
-        self.cache.get(path).await
+        if let Some(out) = self.cache.get(path).await {
+            return Some(out);
+        }
+
+        match self.upload_data.read().await.entries.get(path) {
+            None => {
+
+            }
+            Some(_) => {}
+        }
+
+        todo!()
     }
 
     pub async fn not_found(&self) -> Option<(Vec<u8>, String)> {

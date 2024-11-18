@@ -7,11 +7,12 @@ use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
 };
+use color_eyre::eyre::bail;
 use tokio::{fs::File, io::AsyncReadExt};
 use walkdir::WalkDir;
 
 struct Entry {
-    pb: PathBuf,
+    path: String,
     contents: Vec<u8>,
     hash: String,
     mime_guess: MimeGuess,
@@ -23,6 +24,10 @@ pub async fn upload_dir_to_bucket(
     existing: Option<UploadData>,
 ) -> color_eyre::Result<()> {
     async fn read_file(pb: PathBuf) -> color_eyre::Result<Entry> {
+        let Some(path) = pb.to_str().map(|x| x.to_string()) else {
+            bail!("unable to get UTF-8 path")
+        };
+
         trace!(?pb, "Reading file");
 
         let contents: Vec<u8> = {
@@ -51,7 +56,7 @@ pub async fn upload_dir_to_bucket(
         info!(len=?contents.len(), ?pb, "Read file");
 
         Ok(Entry {
-            pb,
+            path,
             contents,
             hash,
             mime_guess,
@@ -60,19 +65,15 @@ pub async fn upload_dir_to_bucket(
     async fn write_file_to_bucket(
         bucket: &Bucket,
         Entry {
-            pb,
+            path,
             contents,
             hash: _,
             mime_guess,
         }: Entry,
     ) -> color_eyre::Result<()> {
         let content_type = mime_guess.first_or_octet_stream();
-        let Some(path) = pb.to_str() else {
-            error!(?pb, "unable to get string repr of path");
-            return Ok(());
-        };
         let rsp = bucket
-            .put_object_with_content_type(path, &contents, content_type.essence_str())
+            .put_object_with_content_type(&path, &contents, content_type.essence_str())
             .await?;
 
         info!(?path, ?content_type, code=%rsp.status_code(), "Uploaded to S3");
@@ -98,19 +99,19 @@ pub async fn upload_dir_to_bucket(
     while let Some(entry) = futures.next().await {
         let entry = entry?;
 
-        to_delete.remove(&entry.pb);
+        to_delete.remove(&entry.path);
 
-        match existing_entries.get(&entry.pb) {
+        match existing_entries.get(&entry.path) {
             None => {
-                entries.insert(entry.pb.clone(), entry.hash.clone());
+                entries.insert(entry.path.clone(), entry.hash.clone());
                 to_write.push(entry);
             }
             Some(x) => {
-                entries.insert(entry.pb.clone(), entry.hash.clone());
+                entries.insert(entry.path.clone(), entry.hash.clone());
                 if x != &entry.hash {
                     to_write.push(entry);
                 } else {
-                    trace!(pb=?entry.pb, "Skipping upload");
+                    trace!(pb=?entry.path, "Skipping upload");
                 }
             }
         }
@@ -140,11 +141,9 @@ pub async fn upload_dir_to_bucket(
     info!("Uploaded object data to S3");
 
 
-    for pb in to_delete {
-        if let Some(path) = pb.to_str() {
-            info!(?path, "Deleting old file");
-            bucket.delete_object(path).await?;
-        }
+    for path in to_delete {
+        info!(?path, "Deleting old file");
+        bucket.delete_object(path).await?;
     }
 
     info!("Deleted old files from S3");
