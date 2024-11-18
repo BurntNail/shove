@@ -92,7 +92,6 @@ pub async fn upload_dir_to_bucket(
         .map(|item| read_file(item.path().to_path_buf()))
         .collect();
 
-
     let mut to_write = vec![];
     let mut to_delete: HashSet<_> = existing_entries.keys().collect();
     let mut entries = HashMap::new();
@@ -119,7 +118,10 @@ pub async fn upload_dir_to_bucket(
 
     info!("Read all files");
 
-    let upload_data = UploadData { entries, root: PathBuf::from(dir) };
+    let upload_data = UploadData {
+        entries,
+        root: PathBuf::from(dir),
+    };
     let json_upload_data = serde_json::to_vec(&upload_data)?;
     bucket
         .put_object_with_content_type(UPLOAD_DATA_LOCATION, &json_upload_data, mime::JSON.as_str())
