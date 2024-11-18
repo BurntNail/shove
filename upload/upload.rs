@@ -118,6 +118,16 @@ pub async fn upload_dir_to_bucket(
 
     info!("Read all files");
 
+    let mut futures: FuturesUnordered<_> = to_write
+        .into_iter()
+        .map(|e| write_file_to_bucket(&bucket, e))
+        .collect();
+    while let Some(res) = futures.next().await {
+        res?;
+    }
+
+    info!("Uploaded files to S3");
+
     let upload_data = UploadData {
         entries,
         root: PathBuf::from(dir),
@@ -129,15 +139,6 @@ pub async fn upload_dir_to_bucket(
 
     info!("Uploaded object data to S3");
 
-    let mut futures: FuturesUnordered<_> = to_write
-        .into_iter()
-        .map(|e| write_file_to_bucket(&bucket, e))
-        .collect();
-    while let Some(res) = futures.next().await {
-        res?;
-    }
-
-    info!("Uploaded files to S3");
 
     for pb in to_delete {
         if let Some(path) = pb.to_str() {

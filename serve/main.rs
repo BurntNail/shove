@@ -65,7 +65,7 @@ async fn main() -> color_eyre::Result<()> {
                     info!("Stop signal received for saver");
                     break;
                 },
-                () = tokio::time::sleep(Duration::from_secs(30)) => {
+                () = tokio::time::sleep(Duration::from_secs(60)) => {
                     if let Err(e) = reload_state.reload().await {
                         error!(?e, "Error reloading state");
                     }

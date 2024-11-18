@@ -7,7 +7,7 @@ pub mod aws;
 #[macro_use]
 extern crate tracing;
 
-#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone, Eq, PartialEq)]
 pub struct UploadData {
     ///path to hash
     pub entries: HashMap<PathBuf, String>,

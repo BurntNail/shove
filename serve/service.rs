@@ -21,23 +21,24 @@ impl Service<Request<Incoming>> for ServeService {
     fn call(&self, req: Request<Incoming>) -> Self::Future {
         let state = self.state.clone();
 
-        let raw_path = req.uri().path();
-        let path = if !raw_path.is_empty() {
-            let mut path = format!("{}{}", state.file_root_dir().to_string_lossy(), raw_path);
-
-            let bytes = path.as_bytes();
-            if bytes[bytes.len() - 1] == b'/' {
-                path.push_str("index.html");
-            }
-
-            path
-        } else {
-            "index.html".to_string()
-        };
-
-        info!(?path, ?raw_path, "Serving");
-
         Box::pin(async move {
+            let raw_path = req.uri().path();
+            let path = if !raw_path.is_empty() {
+                let root = state.file_root_dir().await;
+                let mut path = format!("{}{}", root.to_string_lossy(), raw_path);
+
+                let bytes = path.as_bytes();
+                if bytes[bytes.len() - 1] == b'/' {
+                    path.push_str("index.html");
+                }
+
+                path
+            } else {
+                "index.html".to_string()
+            };
+
+            trace!(?path, ?raw_path, "Serving");
+
             match state.get(&path).await {
                 Some((content, content_type)) => {
                     let rsp = Response::builder()
@@ -47,7 +48,7 @@ impl Service<Request<Incoming>> for ServeService {
 
                     Ok(rsp)
                 }
-                None => match state.not_found() {
+                None => match state.not_found().await {
                     Some((content, content_type)) => {
                         let rsp = Response::builder()
                             .status(StatusCode::NOT_FOUND)
