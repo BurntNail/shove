@@ -81,6 +81,7 @@ pub async fn upload_dir_to_bucket(
     }
 
     let UploadData {
+        root: _,
         entries: existing_entries,
     } = existing.unwrap_or_default();
 
@@ -118,7 +119,7 @@ pub async fn upload_dir_to_bucket(
 
     info!("Read all files");
 
-    let upload_data = UploadData { entries };
+    let upload_data = UploadData { entries, root: PathBuf::from(dir) };
     let json_upload_data = serde_json::to_vec(&upload_data)?;
     bucket
         .put_object_with_content_type(UPLOAD_DATA_LOCATION, &json_upload_data, mime::JSON.as_str())

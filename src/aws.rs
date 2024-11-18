@@ -27,7 +27,7 @@ pub fn get_aws_creds() -> Credentials {
 pub async fn get_upload_data(bucket: &Box<Bucket>) -> color_eyre::Result<Option<UploadData>> {
     let data = bucket.get_object(UPLOAD_DATA_LOCATION).await;
     match data {
-        Ok(data) => Ok(Some(serde_json::from_slice(data.as_slice())?)),
+        Ok(data) => Ok(Some(serde_json::from_slice(data.as_slice()).unwrap_or_default())),
         Err(e) => match e {
             S3Error::HttpFailWithBody(404, _) => Ok(None),
             _ => Err(e.into()),

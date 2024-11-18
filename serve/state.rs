@@ -11,13 +11,14 @@ use bloggthingie::UploadData;
 pub struct State {
     bucket: Box<Bucket>,
     upload_data: UploadData,
-    cache: Cache<PathBuf, (Vec<u8>, String)>,
+    cache: Cache<String, (Vec<u8>, String)>,
+    not_found: Option<(Vec<u8>, String)>,
 }
 
 impl State {
     pub async fn new () -> color_eyre::Result<Option<Self>> {
-        async fn read_file (path: &PathBuf, bucket: &Box<Bucket>) -> color_eyre::Result<(Vec<u8>, String, PathBuf)> {
-            let contents = bucket.get_object(path.to_str().unwrap()).await?;
+        async fn read_file (path: String, bucket: &Box<Bucket>) -> color_eyre::Result<(Vec<u8>, String, String)> {
+            let contents = bucket.get_object(&path).await?;
             let headers = contents.headers();
 
             let Some(content_type) = headers.get("content-type") else {
@@ -26,7 +27,7 @@ impl State {
             let bytes = contents.to_vec();
             trace!(?path, len=?bytes.len(), ?content_type, "Read in file from S3");
 
-            Ok((bytes, content_type.to_owned(), path.to_owned()))
+            Ok((bytes, content_type.to_owned(), path))
         }
 
         let bucket = get_bucket();
@@ -36,14 +37,22 @@ impl State {
         info!("Got bucket & upload data");
 
         let cache = Cache::new(1024);
-        let mut read_files: FuturesUnordered<_> = upload_data.entries.keys().map(|pb| read_file(pb, &bucket)).collect();
+        let mut read_files: FuturesUnordered<_> = upload_data.entries.keys().filter_map(|x| x.to_str())
+            .map(|pb| read_file(pb.to_string(), &bucket)).collect();
+
+        let mut not_found = None;
 
         while let Some(res) = read_files.next().await {
-            let (contents, content_type, pathbuf) = res?;
-            cache.insert(pathbuf, (contents, content_type)).await;
+            let (contents, content_type, path) = res?;
+
+            if path.contains("404.html") {
+                not_found = Some((contents.clone(), content_type.clone()));
+            }
+
+            cache.insert(path, (contents, content_type)).await;
         }
 
-        info!("Read files");
+        info!("Read files from S3");
 
         drop(read_files);
 
@@ -52,6 +61,19 @@ impl State {
             bucket,
             upload_data,
             cache,
+            not_found
         }))
+    }
+
+    pub async fn get (&self, path: &str) -> Option<(Vec<u8>, String)> {
+        self.cache.get(path).await
+    }
+
+    pub fn not_found (&self) -> Option<(Vec<u8>, String)> {
+        self.not_found.clone()
+    }
+
+    pub fn file_root_dir (&self) -> PathBuf {
+        self.upload_data.root.clone()
     }
 }

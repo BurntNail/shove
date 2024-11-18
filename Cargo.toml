@@ -4,11 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-axum = "0.7.9"
 blake2 = "0.10.6"
 color-eyre = "0.6.3"
 dotenvy = "0.15.7"
 futures = "0.3.31"
+http-body-util = "0.1.2"
+hyper = { version = "1.5.0", features = ["full"] }
+hyper-util = { version = "0.1.10", features = ["full"] }
 mime = "0.3.17"
 moka = { version = "0.12.8", features = ["future"] }
 new_mime_guess = "4.0.4"

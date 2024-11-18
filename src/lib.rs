@@ -11,6 +11,7 @@ extern crate tracing;
 pub struct UploadData {
     ///path to hash
     pub entries: HashMap<PathBuf, String>,
+    pub root: PathBuf,
 }
 
 pub fn setup() {
