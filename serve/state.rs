@@ -1,4 +1,4 @@
-use bloggthingie::{
+use shove::{
     aws::{get_bucket, get_upload_data},
     UploadData,
 };

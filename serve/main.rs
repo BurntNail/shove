@@ -2,7 +2,7 @@ mod service;
 mod state;
 
 use crate::{service::ServeService, state::State};
-use bloggthingie::setup;
+use shove::setup;
 use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
 use std::{env::var, time::Duration};

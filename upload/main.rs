@@ -1,5 +1,5 @@
 use crate::upload::upload_dir_to_bucket;
-use bloggthingie::{
+use shove::{
     aws::{get_bucket, get_upload_data},
     setup,
 };

@@ -1,5 +1,5 @@
 [package]
-name = "bloggthingie"
+name = "shove"
 version = "0.1.0"
 edition = "2021"
 
@@ -24,10 +24,10 @@ walkdir = "2.5.0"
 
 
 [[bin]]
-name = "btupload"
+name = "shoveup"
 path = "upload/main.rs"
 
 
 [[bin]]
-name = "btserve"
+name = "shovedown"
 path = "serve/main.rs"

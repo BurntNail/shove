@@ -8,7 +8,7 @@
 # Create a stage for building the application.
 
 ARG RUST_VERSION=1.82.0
-ARG APP_NAME=bloggthingie
+ARG APP_NAME=shove
 FROM rust:${RUST_VERSION}-slim-bullseye AS build
 ARG APP_NAME
 WORKDIR /app
@@ -30,8 +30,8 @@ RUN --mount=type=bind,source=src,target=src \
     <<EOF
 set -e
 
-cargo build --release --bin btserve
-cp ./target/release/btserve /bin/server
+cargo build --release --bin shovedown
+cp ./target/release/shovedown /bin/server
 EOF
 
 ################################################################################
