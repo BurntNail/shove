@@ -1,11 +1,6 @@
 use crate::state::State;
 use http_body_util::Full;
-use hyper::{
-    body::{Bytes, Incoming},
-    http,
-    service::Service,
-    Request, Response, StatusCode,
-};
+use hyper::{body::{Bytes, Incoming}, http, service::Service, Method, Request, Response, StatusCode};
 use std::{future::Future, path::PathBuf, pin::Pin};
 
 #[derive(Debug, Clone)]
@@ -22,6 +17,15 @@ impl Service<Request<Incoming>> for ServeService {
         let state = self.state.clone();
 
         Box::pin(async move {
+            let is_head = req.method() == Method::HEAD;
+            if !(req.method() == Method::GET || is_head) {
+                let rsp = Response::builder()
+                    .status(StatusCode::METHOD_NOT_ALLOWED)
+                    .body(Full::default())?;
+
+                return Ok(rsp);
+            };
+
             let path = req.uri().path();
             let mut path = path.to_string();
 
@@ -39,17 +43,22 @@ impl Service<Request<Incoming>> for ServeService {
 
             match state.get(&path).await {
                 Some((content, content_type, sc)) => {
-                    let rsp = Response::builder()
+                    let builder = Response::builder()
                         .status(sc)
                         .header("Content-Type", content_type)
-                        .body(Full::new(Bytes::from(content)))?;
+                        .header("Content-Length", content.len());
 
-                    Ok(rsp)
+                    if is_head {
+                        Ok(builder.body(Full::default())?)
+                    } else {
+                        Ok(builder
+                            .body(Full::new(Bytes::from(content)))?)
+                    }
                 }
                 None => {
                     let rsp = Response::builder()
                         .status(StatusCode::NOT_FOUND)
-                        .body(Full::new(Bytes::new()))?;
+                        .body(Full::default())?;
 
                     Ok(rsp)
                 }
