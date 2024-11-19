@@ -14,7 +14,7 @@ mod upload;
 async fn main() -> color_eyre::Result<()> {
     setup();
 
-    let dir = args().nth(1).expect("usage: btupload [DIR]");
+    let dir = args().nth(1).expect("usage: shoveup [DIR]");
 
     let bucket = get_bucket();
     let current_upload_data = get_upload_data(&bucket).await?;

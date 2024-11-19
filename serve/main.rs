@@ -6,6 +6,7 @@ use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
 use shove::setup;
 use std::{env::var, time::Duration};
+use std::net::SocketAddr;
 use tokio::{
     net::TcpListener,
     signal,
@@ -52,7 +53,7 @@ async fn main() -> color_eyre::Result<()> {
     setup();
 
     let port = var("PORT").expect("expected env var PORT");
-    let addr = format!("0.0.0.0:{port}");
+    let addr: SocketAddr = format!("0.0.0.0:{port}").parse().expect("expected valid socket address to result from env var PORT");
 
     let state = State::new().await?.expect("empty bucket");
 
@@ -110,7 +111,7 @@ async fn main() -> color_eyre::Result<()> {
         _ = graceful.shutdown() => {
             eprintln!("all connections gracefully closed");
         },
-        _ = tokio::time::sleep(std::time::Duration::from_secs(10)) => {
+        _ = tokio::time::sleep(Duration::from_secs(10)) => {
             eprintln!("timed out wait for all connections to close");
         }
     }

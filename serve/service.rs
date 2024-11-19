@@ -32,6 +32,13 @@ impl Service<Request<Incoming>> for ServeService {
             };
 
             let path = req.uri().path();
+            if path == "/healthcheck" {
+                let rsp = Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Full::default())?;
+                return Ok(rsp);
+            }
+
             let mut path = path.to_string();
 
             if PathBuf::from(&path)
