@@ -1,12 +1,12 @@
-use shove::{
-    aws::{get_bucket, get_upload_data},
-    UploadData,
-};
 use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
 use hyper::StatusCode;
 use moka::future::{Cache, CacheBuilder};
 use s3::Bucket;
+use shove::{
+    aws::{get_bucket, get_upload_data},
+    UploadData,
+};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::RwLock;
 

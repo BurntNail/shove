@@ -2,9 +2,9 @@ mod service;
 mod state;
 
 use crate::{service::ServeService, state::State};
-use shove::setup;
 use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
+use shove::setup;
 use std::{env::var, time::Duration};
 use tokio::{
     net::TcpListener,

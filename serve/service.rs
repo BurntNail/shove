@@ -1,6 +1,11 @@
 use crate::state::State;
 use http_body_util::Full;
-use hyper::{body::{Bytes, Incoming}, http, service::Service, Method, Request, Response, StatusCode};
+use hyper::{
+    body::{Bytes, Incoming},
+    http,
+    service::Service,
+    Method, Request, Response, StatusCode,
+};
 use std::{future::Future, path::PathBuf, pin::Pin};
 
 #[derive(Debug, Clone)]
@@ -51,8 +56,7 @@ impl Service<Request<Incoming>> for ServeService {
                     if is_head {
                         Ok(builder.body(Full::default())?)
                     } else {
-                        Ok(builder
-                            .body(Full::new(Bytes::from(content)))?)
+                        Ok(builder.body(Full::new(Bytes::from(content)))?)
                     }
                 }
                 None => {
