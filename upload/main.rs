@@ -17,6 +17,22 @@ async fn main() -> color_eyre::Result<()> {
     setup::<false>();
 
     let dir = args().nth(1).expect("usage: shoveup [DIR]");
+    let dir_path_buffer = PathBuf::from(&dir).canonicalize()?;
+    if !dir_path_buffer.exists() {
+        bail!("unable to find provided DIR");
+    }
+    if !dir_path_buffer.is_dir() {
+        bail!("provided DIR must be a directory")
+    }
+    if dir_path_buffer.eq(&current_dir()?) {
+        bail!("provided DIR must be a different directory");
+    }
+
+    info!(?dir_path_buffer, "Reading files");
+
+
+
+
 
     let bucket = get_bucket();
     let current_upload_data = get_upload_data(&bucket).await?;
