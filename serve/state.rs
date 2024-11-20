@@ -18,6 +18,7 @@ pub struct State {
 }
 
 impl State {
+    #[instrument(skip(bucket))]
     async fn read_file_from_s3(
         path: String,
         bucket: &Bucket,
@@ -34,6 +35,7 @@ impl State {
         Ok((bytes, content_type.to_owned(), path))
     }
 
+    #[instrument]
     pub async fn new() -> color_eyre::Result<Option<Self>> {
         let bucket = get_bucket();
         let Some(upload_data) = get_upload_data(&bucket).await? else {
@@ -85,6 +87,7 @@ impl State {
         }))
     }
 
+    #[instrument(skip(self))]
     pub async fn reload(&self) -> color_eyre::Result<()> {
         trace!("Checking for reload");
 
@@ -149,6 +152,7 @@ impl State {
         Ok(())
     }
 
+    #[instrument(skip(self))]
     pub async fn get(&self, path: &str) -> Option<(Vec<u8>, String, StatusCode)> {
         let root = self.upload_data.read().await.clone().root;
         let path = format!("{root}{path}");

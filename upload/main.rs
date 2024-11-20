@@ -3,7 +3,9 @@ use shove::{
     aws::{get_bucket, get_upload_data},
     setup,
 };
-use std::env::args;
+use std::env::{args, current_dir};
+use std::path::PathBuf;
+use color_eyre::eyre::bail;
 
 #[macro_use]
 extern crate tracing;
@@ -12,7 +14,7 @@ mod upload;
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-    setup();
+    setup::<false>();
 
     let dir = args().nth(1).expect("usage: shoveup [DIR]");
 

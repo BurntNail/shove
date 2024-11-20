@@ -48,10 +48,41 @@ async fn shutdown_signal(stop_send: Sender<()>, handle: JoinHandle<()>) {
     handle.await.expect("error in reloader thread");
 }
 
-#[tokio::main]
-async fn main() -> color_eyre::Result<()> {
-    setup();
+fn main () {
+    setup::<true>();
+    let dsn = match var("SENTRY_DSN") {
+        Ok(x) => match x.parse() {
+            Ok(x) => Some(x),
+            Err(e) => {
+                warn!(?e, "Error parsing sentry DSN");
+                None
+            }
+        },
+        Err(_) => {
+            warn!("No Sentry DSN detected");
+            None
+        }
+    };
 
+    let _sentry = sentry::init(sentry::ClientOptions {
+        dsn,
+        release: sentry::release_name!(),
+        traces_sample_rate: 0.1,
+        ..Default::default()
+    });
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("unable to build tokio runtime")
+        .block_on(async {
+           if let Err(e) = run().await {
+               error!(?e, "Error running main function");
+           }
+        });
+}
+
+async fn run() -> color_eyre::Result<()> {
     let port = var("PORT").expect("expected env var PORT");
     let addr: SocketAddr = format!("0.0.0.0:{port}").parse().expect("expected valid socket address to result from env var PORT");
 

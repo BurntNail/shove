@@ -4,7 +4,7 @@
 #
 
 app = 'bloggthingie'
-primary_region = 'lhr'
+primary_region = 'sin'
 
 [build]
 

@@ -14,7 +14,7 @@ pub struct UploadData {
     pub root: String,
 }
 
-pub fn setup() {
+pub fn setup<const SENTRY: bool>() {
     if cfg!(debug_assertions) {
         for (key, value) in &[
             ("RUST_SPANTRACE", "full"),
@@ -35,13 +35,21 @@ pub fn setup() {
     }
 
     match dotenvy::dotenv() {
-        Ok(file) => info!(?file, "Found env vars"),
-        Err(e) => warn!(?e, "Error finding env vars"),
+        Ok(file) => println!("Found env vars: {file:?}"),
+        Err(e) => eprintln!("Error finding env vars: {e:?}"),
     }
 
-    tracing_subscriber::registry()
+    let sub = tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
-        .with(EnvFilter::from_default_env())
-        .init();
+        .with(EnvFilter::from_default_env());
+
+    if SENTRY {
+        sub
+            .with(sentry::integrations::tracing::layer())
+            .init()
+    } else {
+        sub.init();
+    }
+
     color_eyre::install().expect("unable to install color-eyre");
 }
