@@ -3,8 +3,8 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use hyper::StatusCode;
 use moka::future::{Cache, CacheBuilder};
 use s3::Bucket;
-use shove::{
-    aws::{get_bucket, get_upload_data},
+use crate::{
+    s3::{get_bucket, get_upload_data},
     UploadData,
 };
 use std::{collections::HashSet, sync::Arc};

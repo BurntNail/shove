@@ -23,15 +23,14 @@ RUN apt update && apt install -y pkg-config libssl-dev
 # source code into the container. Once built, copy the executable to an
 # output directory before the cache mounted /app/target is unmounted.
 RUN --mount=type=bind,source=src,target=src \
-    --mount=type=bind,source=serve,target=serve \
     --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
     --mount=type=cache,target=/app/target/ \
     --mount=type=cache,target=/usr/local/cargo/registry/ \
     <<EOF
 set -e
 
-cargo build --release --bin shovedown
-cp ./target/release/shovedown /bin/server
+cargo build --release
+cp ./target/release/shove /bin/server
 EOF
 
 ################################################################################
@@ -72,4 +71,4 @@ COPY --from=build /bin/server /bin/
 EXPOSE 8080
 
 # What the container should run when it is started.
-CMD ["/bin/server"]
+CMD ["/bin/server", "serve"]
