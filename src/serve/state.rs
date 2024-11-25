@@ -49,13 +49,18 @@ impl State {
             .build();
 
         let tigris_token = env::var("TIGRIS_TOKEN").ok().map(|x| x.into());
+        if tigris_token.is_some() {
+            info!("Waiting on Tigris Webhook for reloads");
+        } else {
+            info!("Checking every 60s for reloads");
+        }
 
         match Self::read_file_from_s3(format!("{}/404.html", &upload_data.root), &bucket).await {
             Ok((contents, content_type, path)) => {
                 info!("Adding 404 path to cache");
                 cache.insert(path, (contents, content_type)).await;
             }
-            Err(e) => warn!(?e, "Error getting 404 page from S3"),
+            Err(e) => error!(?e, "Error getting 404 page from S3"),
         }
 
         let task_cache = cache.clone();

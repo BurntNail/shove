@@ -52,7 +52,7 @@ pub async fn serve() -> color_eyre::Result<()> {
 
     let state = State::new().await?.expect("empty bucket");
 
-    let reload = if state.tigris_token.is_some() {
+    let reload = if state.tigris_token.is_none() {
         let (send_stop, mut recv_stop) = channel(1);
         let reload_state = state.clone();
         Some((
@@ -64,6 +64,7 @@ pub async fn serve() -> color_eyre::Result<()> {
                             break;
                         },
                         () = tokio::time::sleep(Duration::from_secs(60)) => {
+                            info!("Reloading from timer");
                             if let Err(e) = reload_state.reload().await {
                                 error!(?e, "Error reloading state");
                             }
