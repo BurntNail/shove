@@ -52,14 +52,20 @@ async fn serve_post(
                 return empty_with_code(StatusCode::METHOD_NOT_ALLOWED);
             };
 
-            if req.uri().path() == "/reload" {
+            if req.uri().path() != "/reload" {
                 return empty_with_code(StatusCode::NOT_FOUND);
             }
 
             let headers = req.headers();
-            let provided_auth_token = match headers.get("Authorization: ").cloned() {
+            let provided_auth_token = match headers.get("Authorization").cloned() {
                 Some(x) => match x.to_str() {
-                    Ok(x) => Arc::<str>::from(x),
+                    Ok(x) => match x.strip_prefix("Bearer ") {
+                    	Some(x) => Arc::<str>::from(x),
+                    	None => {
+                    		warn!("Unable to find Bearer part");
+                        	return empty_with_code(StatusCode::BAD_REQUEST);
+                    	}
+                    }
                     Err(e) => {
                         warn!(?e, "Error converting auth token to string");
                         return empty_with_code(StatusCode::BAD_REQUEST);
