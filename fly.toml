@@ -20,10 +20,10 @@ primary_region = 'sin'
   processes = ['app']
 
 [[http_service.checks]]
-  grace_period = "10s"
-  interval = "30s"
+  grace_period = "2s"
+  interval = "15s"
   method = "GET"
-  timeout = "5s"
+  timeout = "2s"
   path = "/healthcheck"
 
 [[vm]]

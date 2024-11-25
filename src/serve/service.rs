@@ -41,7 +41,7 @@ fn empty_with_code(code: StatusCode) -> Result<Response<Full<Bytes>>, http::Erro
     Response::builder().status(code).body(Full::default())
 }
 
-#[instrument(skip(state))]
+#[instrument(skip(state, req))]
 async fn serve_post(
     req: Request<Incoming>,
     state: State,
@@ -91,6 +91,7 @@ async fn serve_post(
     }
 }
 
+#[instrument(skip(req, state))]
 async fn serve_get_head(
     req: Request<Incoming>,
     state: State,
