@@ -1,13 +1,13 @@
+use crate::{
+    s3::{get_bucket, get_upload_data},
+    UploadData,
+};
 use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
 use hyper::StatusCode;
 use moka::future::{Cache, CacheBuilder};
 use s3::Bucket;
-use crate::{
-    s3::{get_bucket, get_upload_data},
-    UploadData,
-};
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, env, sync::Arc};
 use tokio::sync::RwLock;
 
 #[derive(Clone, Debug)]
@@ -15,6 +15,7 @@ pub struct State {
     bucket: Box<Bucket>,
     upload_data: Arc<RwLock<UploadData>>,
     cache: Cache<String, (Vec<u8>, String)>,
+    pub tigris_token: Option<Arc<str>>,
 }
 
 impl State {
@@ -46,6 +47,8 @@ impl State {
         let cache = CacheBuilder::new(1024)
             .support_invalidation_closures()
             .build();
+
+        let tigris_token = env::var("TIGRIS_TOKEN").ok().map(|x| x.into());
 
         match Self::read_file_from_s3(format!("{}/404.html", &upload_data.root), &bucket).await {
             Ok((contents, content_type, path)) => {
@@ -84,6 +87,7 @@ impl State {
             bucket,
             upload_data: Arc::new(RwLock::new(upload_data)),
             cache,
+            tigris_token,
         }))
     }
 

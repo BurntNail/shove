@@ -1,7 +1,7 @@
 use crate::{
     s3::{get_bucket, get_upload_data},
+    upload::machinery::upload_dir_to_bucket,
 };
-use crate::upload::machinery::upload_dir_to_bucket;
 
 mod machinery;
 

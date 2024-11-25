@@ -1,16 +1,17 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::env::{args, current_dir};
-use std::path::PathBuf;
-use dotenvy::var;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use crate::{serve::serve, upload::upload};
 use color_eyre::owo_colors::OwoColorize;
-use crate::serve::serve;
-use crate::upload::upload;
+use dotenvy::var;
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    env::{args, current_dir},
+    path::PathBuf,
+};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 mod s3;
-mod upload;
 mod serve;
+mod upload;
 
 #[macro_use]
 extern crate tracing;
@@ -51,12 +52,8 @@ pub fn setup() {
         .with(tracing_subscriber::fmt::layer())
         .with(EnvFilter::from_default_env());
 
-
-
     if var("SENTRY_DSN").is_ok() {
-        sub
-            .with(sentry::integrations::tracing::layer())
-            .init()
+        sub.with(sentry::integrations::tracing::layer()).init()
     } else {
         sub.init();
     }
@@ -66,18 +63,18 @@ pub fn setup() {
 
 pub enum Args {
     Serve,
-    Upload(String)
+    Upload(String),
 }
 
 impl Args {
-    pub fn parse () -> Self {
+    pub fn parse() -> Self {
         let mut env_vars = args().skip(1);
 
         if let Some(command) = env_vars.next() {
             match command.as_str() {
                 "serve" => {
                     return Self::Serve;
-                },
+                }
                 "upload" => {
                     if let Some(dir) = env_vars.next() {
                         let mut failed = false;
@@ -95,16 +92,20 @@ impl Args {
                             failed = true;
                         }
                         match current_dir() {
-                            Ok(cd) => if dir_path_buffer.eq(&cd) {
-                                eprintln!("provided {} must be a different from current directory", "[DIR]".blue());
-                                failed = true;
-                            },
+                            Ok(cd) => {
+                                if dir_path_buffer.eq(&cd) {
+                                    eprintln!(
+                                        "provided {} must be a different from current directory",
+                                        "[DIR]".blue()
+                                    );
+                                    failed = true;
+                                }
+                            }
                             Err(e) => {
                                 eprintln!("unable to access current directory: {e:?}");
                                 failed = true;
                             }
                         }
-
 
                         if !failed {
                             return Self::Upload(dir);
@@ -115,13 +116,19 @@ impl Args {
                         eprintln!("missing argument {}", "[DIR]".blue());
                         std::process::exit(1);
                     }
-                },
+                }
                 _ => {}
             }
         }
 
-        eprintln!("{} is a command-line utility to upload to and serve from S3 buckets", "shove".bold());
-        eprintln!("All source code can be found at {}", "https://github.com/BurntNail/shove".underline());
+        eprintln!(
+            "{} is a command-line utility to upload to and serve from S3 buckets",
+            "shove".bold()
+        );
+        eprintln!(
+            "All source code can be found at {}",
+            "https://github.com/BurntNail/shove".underline()
+        );
         eprintln!();
         eprintln!("Usage: {} [command]", "shove".bold());
         eprintln!();
@@ -130,27 +137,54 @@ impl Args {
         eprintln!("- {} {}", "upload".italic(), "[DIR]".blue());
         eprintln!();
         eprintln!("`{}` command", "serve".italic());
-        eprintln!("  Serves the provided {} on the provided {}", "S3_BUCKET".green(), "PORT".green());
+        eprintln!(
+            "  Serves the provided {} on the provided {}",
+            "S3_BUCKET".green(),
+            "PORT".green()
+        );
         eprintln!("  eg. `{}`", "shove serve".cyan());
         eprintln!();
         eprintln!("`{}` command", "upload".italic());
-        eprintln!("  Takes in a {}, which must be a valid directory other than the current directory", "DIR".blue());
-        eprintln!("  Uploads {} to the provided {}", "DIR".blue(), "S3_BUCKET".green());
+        eprintln!(
+            "  Takes in a {}, which must be a valid directory other than the current directory",
+            "DIR".blue()
+        );
+        eprintln!(
+            "  Uploads {} to the provided {}",
+            "DIR".blue(),
+            "S3_BUCKET".green()
+        );
         eprintln!("  eg. `{}`", "shove upload public".cyan());
         eprintln!();
         eprintln!("{}", "Environment Variables".underline());
-        eprintln!("{} - the secret key ID for the S3 bucket", "AWS_ACCESS_KEY_ID".green());
-        eprintln!("{} - the secret access key for the S3 bucket", "AWS_SECRET_ACCESS_KEY".green());
+        eprintln!(
+            "{} - the secret key ID for the S3 bucket",
+            "AWS_ACCESS_KEY_ID".green()
+        );
+        eprintln!(
+            "{} - the secret access key for the S3 bucket",
+            "AWS_SECRET_ACCESS_KEY".green()
+        );
         eprintln!("{} - the name of the S3 bucket", "S3_BUCKET".green());
-        eprintln!("{} - the endpoint of the S3 bucket", "AWS_ENDPOINT_URL_S3".green());
-        eprintln!("{} - the port used for serving the bucket. Not needed if uploading", "PORT".green());
-        eprintln!("{} - the sentry DSN for use with analytics. Not needed if uploading. Optional", "SENTRY_DSN".green());
+        eprintln!(
+            "{} - the endpoint of the S3 bucket",
+            "AWS_ENDPOINT_URL_S3".green()
+        );
+        eprintln!(
+            "{} - the port used for serving the bucket. Not needed if uploading",
+            "PORT".green()
+        );
+        eprintln!(
+            "{} - the sentry DSN for use with analytics. Not needed if uploading. Optional",
+            "SENTRY_DSN".green()
+        );
+        eprintln!("{} - the authentication token for use with Tigris Webhooks. Not needed if uploading. Optional", "TIGRIS_TOKEN".green());
 
         std::process::exit(1);
     }
 }
 
-fn main () {
+fn main() {
     let args = Args::parse();
     setup();
 
@@ -158,7 +192,6 @@ fn main () {
         .enable_all()
         .build()
         .expect("unable to build runtime");
-
 
     match args {
         Args::Serve => {
@@ -188,12 +221,10 @@ fn main () {
                 }
             });
         }
-        Args::Upload(dir) => {
-            runtime.block_on(async move {
-                if let Err(e) = upload(&dir).await {
-                    error!(?e, "Error uploading");
-                }
-            })
-        }
+        Args::Upload(dir) => runtime.block_on(async move {
+            if let Err(e) = upload(&dir).await {
+                error!(?e, "Error uploading");
+            }
+        }),
     }
 }

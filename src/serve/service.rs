@@ -1,3 +1,4 @@
+use crate::serve::state::State;
 use http_body_util::Full;
 use hyper::{
     body::{Bytes, Incoming},
@@ -5,12 +6,17 @@ use hyper::{
     service::Service,
     Method, Request, Response, StatusCode,
 };
-use std::{future::Future, path::PathBuf, pin::Pin};
-use crate::serve::state::State;
+use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc};
 
 #[derive(Debug, Clone)]
 pub struct ServeService {
-    pub(crate) state: State,
+    state: State,
+}
+
+impl ServeService {
+    pub fn new(state: State) -> Self {
+        Self { state }
+    }
 }
 
 impl Service<Request<Incoming>> for ServeService {
@@ -22,58 +28,105 @@ impl Service<Request<Incoming>> for ServeService {
         let state = self.state.clone();
 
         Box::pin(async move {
-            let is_head = req.method() == Method::HEAD;
-            if !(req.method() == Method::GET || is_head) {
-                let rsp = Response::builder()
-                    .status(StatusCode::METHOD_NOT_ALLOWED)
-                    .body(Full::default())?;
-
-                return Ok(rsp);
-            };
-
-            let path = req.uri().path();
-            if path == "/healthcheck" {
-                let rsp = Response::builder()
-                    .status(StatusCode::OK)
-                    .body(Full::default())?;
-                return Ok(rsp);
-            }
-
-            let mut path = path.to_string();
-
-            if PathBuf::from(&path)
-                .extension()
-                .is_none_or(|x| x.is_empty())
-            {
-                if path.as_bytes()[path.as_bytes().len() - 1] != b'/' {
-                    path.push('/');
-                }
-                path.push_str("index.html");
-            }
-
-            trace!(?path, "Serving");
-
-            match state.get(&path).await {
-                Some((content, content_type, sc)) => {
-                    let builder = Response::builder()
-                        .status(sc)
-                        .header("Content-Type", content_type)
-                        .header("Content-Length", content.len());
-
-                    if is_head {
-                        Ok(builder.body(Full::default())?)
-                    } else {
-                        Ok(builder.body(Full::new(Bytes::from(content)))?)
-                    }
-                }
-                None => {
-                    let rsp = Response::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .body(Full::default())?;
-
-                    Ok(rsp)
-                }
+            match *req.method() {
+                Method::POST => serve_post(req, state).await,
+                Method::GET | Method::HEAD => serve_get_head(req, state).await,
+                _ => empty_with_code(StatusCode::METHOD_NOT_ALLOWED),
             }
         })
+    }
+}
+
+fn empty_with_code(code: StatusCode) -> Result<Response<Full<Bytes>>, http::Error> {
+    Response::builder().status(code).body(Full::default())
+}
+
+#[instrument(skip(state))]
+async fn serve_post(
+    req: Request<Incoming>,
+    state: State,
+) -> Result<Response<Full<Bytes>>, http::Error> {
+    match req.uri().path() {
+        "/reload" => {
+            let Some(actual_tigris_token) = state.tigris_token.clone() else {
+                return empty_with_code(StatusCode::METHOD_NOT_ALLOWED);
+            };
+
+            if req.uri().path() == "/reload" {
+                return empty_with_code(StatusCode::NOT_FOUND);
+            }
+
+            let headers = req.headers();
+            let provided_auth_token = match headers.get("Authorization: ").cloned() {
+                Some(x) => match x.to_str() {
+                    Ok(x) => Arc::<str>::from(x),
+                    Err(e) => {
+                        warn!(?e, "Error converting auth token to string");
+                        return empty_with_code(StatusCode::BAD_REQUEST);
+                    }
+                },
+                None => return empty_with_code(StatusCode::BAD_REQUEST),
+            };
+
+            if actual_tigris_token != provided_auth_token {
+                warn!("Tried to reload with incorrect token");
+                return empty_with_code(StatusCode::FORBIDDEN);
+            }
+
+            info!("Reloading from webhook");
+            if let Err(e) = state.reload().await {
+                error!(?e, "Error reloading state");
+                empty_with_code(StatusCode::INTERNAL_SERVER_ERROR)
+            } else {
+                empty_with_code(StatusCode::OK)
+            }
+        }
+        _ => empty_with_code(StatusCode::METHOD_NOT_ALLOWED),
+    }
+}
+
+async fn serve_get_head(
+    req: Request<Incoming>,
+    state: State,
+) -> Result<Response<Full<Bytes>>, http::Error> {
+    let path = req.uri().path();
+    if path == "/healthcheck" {
+        return empty_with_code(StatusCode::OK);
+    }
+
+    let mut path = path.to_string();
+
+    if PathBuf::from(&path)
+        .extension()
+        .is_none_or(|x| x.is_empty())
+    {
+        if path.as_bytes()[path.as_bytes().len() - 1] != b'/' {
+            path.push('/');
+        }
+        path.push_str("index.html");
+    }
+
+    trace!(?path, "Serving");
+
+    match state.get(&path).await {
+        Some((content, content_type, sc)) => {
+            let builder = Response::builder()
+                .status(sc)
+                .header("Content-Type", content_type)
+                .header("Content-Length", content.len());
+
+            if req.method() == Method::HEAD {
+                Ok(builder.body(Full::default())?)
+            } else {
+                Ok(builder.body(Full::new(Bytes::from(content)))?)
+            }
+        }
+        None => {
+            let rsp = Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Full::default())?;
+
+            Ok(rsp)
+        }
     }
 }

@@ -1,21 +1,19 @@
 mod service;
 mod state;
 
+use crate::serve::{service::ServeService, state::State};
 use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
-use std::{env::var, time::Duration};
-use std::net::SocketAddr;
+use std::{env::var, net::SocketAddr, time::Duration};
 use tokio::{
     net::TcpListener,
     signal,
     sync::mpsc::{channel, Sender},
     task::JoinHandle,
 };
-use crate::serve::service::ServeService;
-use crate::serve::state::State;
 
 //from https://github.com/tokio-rs/axum/blob/main/examples/graceful-shutdown/src/main.rs
-async fn shutdown_signal(stop_send: Sender<()>, handle: JoinHandle<()>) {
+async fn shutdown_signal(stop: Option<(JoinHandle<()>, Sender<()>)>) {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -38,42 +36,52 @@ async fn shutdown_signal(stop_send: Sender<()>, handle: JoinHandle<()>) {
         () = terminate => {},
     }
 
-    stop_send
-        .send(())
-        .await
-        .expect("unable to send stop signal to reloader thread");
-    handle.await.expect("error in reloader thread");
+    if let Some((handle, send)) = stop {
+        send.send(())
+            .await
+            .expect("unable to send stop signal to reloader thread");
+        handle.await.expect("error in reloader thread");
+    }
 }
 
 pub async fn serve() -> color_eyre::Result<()> {
     let port = var("PORT").expect("expected env var PORT");
-    let addr: SocketAddr = format!("0.0.0.0:{port}").parse().expect("expected valid socket address to result from env var PORT");
+    let addr: SocketAddr = format!("0.0.0.0:{port}")
+        .parse()
+        .expect("expected valid socket address to result from env var PORT");
 
     let state = State::new().await?.expect("empty bucket");
 
-    let (send_stop, mut recv_stop) = channel(1);
-    let reload_state = state.clone();
-    let reload_handle = tokio::task::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = recv_stop.recv() => {
-                    info!("Stop signal received for saver");
-                    break;
-                },
-                () = tokio::time::sleep(Duration::from_secs(60)) => {
-                    if let Err(e) = reload_state.reload().await {
-                        error!(?e, "Error reloading state");
+    let reload = if state.tigris_token.is_some() {
+        let (send_stop, mut recv_stop) = channel(1);
+        let reload_state = state.clone();
+        Some((
+            tokio::task::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = recv_stop.recv() => {
+                            info!("Stop signal received for saver");
+                            break;
+                        },
+                        () = tokio::time::sleep(Duration::from_secs(60)) => {
+                            if let Err(e) = reload_state.reload().await {
+                                error!(?e, "Error reloading state");
+                            }
+                        }
                     }
                 }
-            }
-        }
-    });
+            }),
+            send_stop,
+        ))
+    } else {
+        None
+    };
 
     let http = http1::Builder::new();
     let graceful = hyper_util::server::graceful::GracefulShutdown::new();
-    let mut signal = std::pin::pin!(shutdown_signal(send_stop, reload_handle));
+    let mut signal = std::pin::pin!(shutdown_signal(reload));
 
-    let svc = ServeService { state };
+    let svc = ServeService::new(state);
 
     let listener = TcpListener::bind(&addr).await?;
     info!(?addr, "Serving");

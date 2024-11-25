@@ -1,9 +1,9 @@
+use crate::{s3::UPLOAD_DATA_LOCATION, UploadData};
 use blake2::{Blake2b512, Digest};
 use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
 use new_mime_guess::MimeGuess;
 use s3::Bucket;
-use crate::{s3::UPLOAD_DATA_LOCATION, UploadData};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Write,
