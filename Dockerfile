@@ -45,7 +45,7 @@ EOF
 # reproducability is important, consider using a digest
 # (e.g.,    debian@sha256:ac707220fbd7b67fc19b112cee8170b41a9e97f703f588b2cdbbcdcecdd8af57).
 FROM debian:bullseye-slim AS final
-LABEL org.opencontainers.image.source=https://github.com/BurntNail/souris
+LABEL org.opencontainers.image.source=https://github.com/BurntNail/shove
 
 RUN apt update && apt install -y --no-install-recommends ca-certificates
 RUN update-ca-certificates
