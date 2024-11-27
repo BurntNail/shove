@@ -7,11 +7,15 @@ use std::{
     env::{args, current_dir},
     path::PathBuf,
 };
+use dialoguer::{Input, Password};
+use dialoguer::theme::ColorfulTheme;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use crate::protect::protect;
 
-mod s3;
+pub mod s3;
 mod serve;
 mod upload;
+mod protect;
 
 #[macro_use]
 extern crate tracing;
@@ -64,19 +68,24 @@ pub fn setup() {
 pub enum Args {
     Serve,
     Upload(String),
+    Protect {
+        pattern: String,
+        username: String,
+        password: String
+    }
 }
 
 impl Args {
     pub fn parse() -> Self {
-        let mut env_vars = args().skip(1);
+        let mut args = args().skip(1);
 
-        if let Some(command) = env_vars.next() {
+        if let Some(command) = args.next() {
             match command.as_str() {
                 "serve" => {
                     return Self::Serve;
                 }
                 "upload" => {
-                    if let Some(dir) = env_vars.next() {
+                    if let Some(dir) = args.next() {
                         let mut failed = false;
 
                         let Ok(dir_path_buffer) = PathBuf::from(&dir).canonicalize() else {
@@ -117,6 +126,18 @@ impl Args {
                         std::process::exit(1);
                     }
                 }
+                "protect" => {
+                    let theme = ColorfulTheme::default();
+                    let pattern = Input::with_theme(&theme).with_prompt("Pattern to protect?").interact().unwrap();
+                    let username = Input::with_theme(&theme).with_prompt("Username?").interact().unwrap();
+                    let password = Password::new()
+                        .with_prompt("Password")
+                        .with_confirmation("Confirm password", "Passwords mismatching")
+                        .interact()
+                        .unwrap();
+
+                    return Self::Protect { pattern, username, password};
+                },
                 _ => {}
             }
         }
@@ -135,6 +156,7 @@ impl Args {
         eprintln!("{}", "Available Commands:".underline());
         eprintln!("- {}", "serve".italic());
         eprintln!("- {} {}", "upload".italic(), "[DIR]".blue());
+        eprintln!("- {}", "protect".italic());
         eprintln!();
         eprintln!("`{}` command", "serve".italic());
         eprintln!(
@@ -155,6 +177,12 @@ impl Args {
             "S3_BUCKET".green()
         );
         eprintln!("  eg. `{}`", "shove upload public".cyan());
+        eprintln!();
+        eprintln!("`{}` command", "protect".italic());
+        eprintln!(
+            "  Asks the user for a directory to protect, and the username/password combo to protect it",
+        );
+        eprintln!("  eg. `{}`", "shove protect".cyan());
         eprintln!();
         eprintln!("{}", "Environment Variables".underline());
         eprintln!(
@@ -226,5 +254,10 @@ fn main() {
                 error!(?e, "Error uploading");
             }
         }),
+        Args::Protect {pattern, username, password} => runtime.block_on(async move {
+            if let Err(e) = protect(pattern, username, password).await {
+                error!(?e, "Error protecting");
+            }
+        });
     }
 }
