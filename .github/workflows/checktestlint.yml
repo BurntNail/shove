@@ -5,13 +5,6 @@ on: [push, pull_request, workflow_dispatch]
 env:
   CARGO_TERM_COLOR: always
 
-permissions:
-  packages: write
-  checks: write
-  contents: read
-  deployments: write
-  statuses: write
-
 jobs:
   check:
     name: Check
