@@ -254,10 +254,12 @@ fn main() {
                 error!(?e, "Error uploading");
             }
         }),
-        Args::Protect {pattern, username, password} => runtime.block_on(async move {
-            if let Err(e) = protect(pattern, username, password).await {
-                error!(?e, "Error protecting");
-            }
-        });
+        Args::Protect {pattern, username, password} => {
+            runtime.block_on(async move {
+                if let Err(e) = protect(pattern, username, password).await {
+                    error!(?e, "Error protecting");
+                }
+            });
+        }
     }
 }
