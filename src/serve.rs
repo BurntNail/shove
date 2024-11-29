@@ -125,10 +125,10 @@ pub async fn serve() -> color_eyre::Result<()> {
 
     tokio::select! {
         _ = futures.shutdown() => {
-            eprintln!("all connections gracefully closed");
+            info!("all connections gracefully closed");
         },
-        _ = tokio::time::sleep(Duration::from_secs(30)) => {
-            eprintln!("timed out wait for all connections to close");
+        _ = tokio::time::sleep(Duration::from_secs(10)) => {
+            error!("timed out wait for all connections to close");
         }
     }
 

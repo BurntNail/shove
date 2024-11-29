@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use color_eyre::eyre::bail;
 use hyper::body::Incoming;
 use hyper::Request;
 use hyper_util::rt::TokioIo;
@@ -8,20 +9,20 @@ use futures::io::{BufWriter, BufReader};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hyper::upgrade::Upgraded;
-use soketto::Sender;
-use tokio::sync::Mutex;
+use soketto::{Sender};
+use tokio::sync::{Mutex};
 
 type WSSender = Sender<BufReader<BufWriter<Compat<TokioIo<Upgraded>>>>>;
 
 #[derive(Clone, Debug)]
 pub struct LiveReloader {
-    senders: Arc<Mutex<Vec<WSSender>>>
+    senders: Arc<Mutex<Vec<WSSender>>>,
 }
 
 impl LiveReloader {
     pub fn new () -> Self {
         Self {
-            senders: Arc::new(Mutex::new(vec![]))
+            senders: Arc::new(Mutex::new(vec![])),
         }
     }
 
@@ -30,7 +31,7 @@ impl LiveReloader {
         let io = TokioIo::new(stream);
         let stream = BufReader::new(BufWriter::new(io.compat()));
 
-        let (sender, _receiver) = server.into_builder(stream).finish();
+        let (sender, _) = server.into_builder(stream).finish();
 
         self.senders.lock().await.push(sender);
 
@@ -45,7 +46,11 @@ impl LiveReloader {
             Ok(())
         }
 
-        let senders = std::mem::take::<Vec<_>>(self.senders.lock().await.as_mut());
+        let Ok(mut senders) = self.senders.try_lock() else {
+            bail!("Already reloading");
+        };
+
+        let senders = std::mem::take::<Vec<_>>(senders.as_mut());
         let mut fo: FuturesUnordered<_> = senders.into_iter().map(reload).collect();
 
         while let Some(res) = fo.next().await {
