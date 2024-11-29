@@ -6,6 +6,7 @@ use hyper::{
     service::Service,
     Method, Request, Response, StatusCode,
 };
+use soketto::handshake::http::{is_upgrade_request, Server};
 use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc};
 
 #[derive(Debug, Clone)]
@@ -26,12 +27,35 @@ impl Service<Request<Incoming>> for ServeService {
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
         let state = self.state.clone();
+        let livereload = state.live_reloader();
 
         Box::pin(async move {
-            match *req.method() {
-                Method::POST => serve_post(req, state).await,
-                Method::GET | Method::HEAD => serve_get_head(req, state).await,
-                _ => empty_with_code(StatusCode::METHOD_NOT_ALLOWED),
+            //thx https://github.com/paritytech/soketto/blob/master/examples/hyper_server.rs
+            if is_upgrade_request(&req) {
+                let mut handshake_server = Server::new();
+
+                match handshake_server.receive_request(&req) {
+                    Ok(rsp) => {
+                        tokio::spawn(async move {
+                            if let Err(e) =
+                                livereload.handle_livereload(req, handshake_server).await
+                            {
+                                error!(?e, "Error with websockets");
+                            }
+                        });
+                        Ok(rsp.map(|()| Full::default()))
+                    }
+                    Err(e) => {
+                        error!(?e, "Couldn't upgrade connection");
+                        empty_with_code(StatusCode::INTERNAL_SERVER_ERROR)
+                    }
+                }
+            } else {
+                match *req.method() {
+                    Method::POST => serve_post(req, state).await,
+                    Method::GET | Method::HEAD => serve_get_head(req, state).await,
+                    _ => empty_with_code(StatusCode::METHOD_NOT_ALLOWED),
+                }
             }
         })
     }
@@ -60,12 +84,12 @@ async fn serve_post(
             let provided_auth_token = match headers.get("Authorization").cloned() {
                 Some(x) => match x.to_str() {
                     Ok(x) => match x.strip_prefix("Bearer ") {
-                    	Some(x) => Arc::<str>::from(x),
-                    	None => {
-                    		warn!("Unable to find Bearer part");
-                        	return empty_with_code(StatusCode::BAD_REQUEST);
-                    	}
-                    }
+                        Some(x) => Arc::<str>::from(x),
+                        None => {
+                            warn!("Unable to find Bearer part");
+                            return empty_with_code(StatusCode::BAD_REQUEST);
+                        }
+                    },
                     Err(e) => {
                         warn!(?e, "Error converting auth token to string");
                         return empty_with_code(StatusCode::BAD_REQUEST);

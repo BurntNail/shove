@@ -1,5 +1,6 @@
 use crate::{
     s3::{get_bucket, get_upload_data},
+    serve::livereload::LiveReloader,
     UploadData,
 };
 use color_eyre::eyre::bail;
@@ -16,6 +17,7 @@ pub struct State {
     upload_data: Arc<RwLock<UploadData>>,
     cache: Cache<String, (Vec<u8>, String)>,
     pub tigris_token: Option<Arc<str>>,
+    live_reloader: LiveReloader,
 }
 
 impl State {
@@ -88,12 +90,19 @@ impl State {
             info!("Read files from S3");
         });
 
+        let live_reloader = LiveReloader::new();
+
         Ok(Some(Self {
             bucket,
             upload_data: Arc::new(RwLock::new(upload_data)),
             cache,
             tigris_token,
+            live_reloader,
         }))
+    }
+
+    pub fn live_reloader(&self) -> LiveReloader {
+        self.live_reloader.clone()
     }
 
     #[instrument(skip(self))]
@@ -137,6 +146,7 @@ impl State {
 
         let task_cache = self.cache.clone();
         let task_bucket = self.bucket.clone();
+        let task_reload = self.live_reloader.clone();
         tokio::task::spawn(async move {
             let mut read_files: FuturesUnordered<_> = to_be_updated
                 .into_iter()
@@ -156,6 +166,9 @@ impl State {
             }
 
             info!("Updated cache from S3");
+            if let Err(e) = task_reload.send_reload().await {
+                error!(?e, "Error reloading tasks");
+            }
         });
 
         Ok(())
