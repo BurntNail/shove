@@ -27,13 +27,12 @@ pub async fn handle_livereload (req: Request<Incoming>, server: Server, mut stop
                 sender.send_text("reload").await?;
                 sender.flush().await?;
                 sender.close().await?;
+                break;
             }
             msg = receiver.receive_data(&mut message) => {
                 match msg {
                     Ok(soketto::Data::Binary(n)) => {
-                        assert_eq!(n, message.len());
-
-                        trace!(?message, "Received binary data");
+                        debug!(?message, "Received binary data");
                     }
                     Ok(soketto::Data::Text(n)) => {
                         assert_eq!(n, message.len());
@@ -43,7 +42,7 @@ pub async fn handle_livereload (req: Request<Incoming>, server: Server, mut stop
 
                             if txt == "ping" {
                                 sender.send_text("pong").await?;
-                                sender.flush().await?
+                                sender.flush().await?;
                             }
                         } else {
                             warn!("Unable to decode message from WS");
