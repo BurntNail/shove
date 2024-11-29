@@ -1,5 +1,6 @@
 mod service;
 mod state;
+mod livereload;
 
 use crate::serve::{service::ServeService, state::State};
 use hyper::server::conn::http1;
@@ -8,12 +9,13 @@ use std::{env::var, net::SocketAddr, time::Duration};
 use tokio::{
     net::TcpListener,
     signal,
-    sync::mpsc::{channel, Sender},
+    sync::mpsc::{channel, Sender as MPSCSender},
+    sync::broadcast::Sender as BCSender,
     task::JoinHandle,
 };
 
 //from https://github.com/tokio-rs/axum/blob/main/examples/graceful-shutdown/src/main.rs
-async fn shutdown_signal(stop: Option<(JoinHandle<()>, Sender<()>)>) {
+async fn shutdown_signal(stop: Option<(JoinHandle<()>, MPSCSender<()>)>, stop_state: BCSender<()>) {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -36,6 +38,7 @@ async fn shutdown_signal(stop: Option<(JoinHandle<()>, Sender<()>)>) {
         () = terminate => {},
     }
 
+    let _ = stop_state.send(());
     if let Some((handle, send)) = stop {
         send.send(())
             .await
@@ -50,7 +53,7 @@ pub async fn serve() -> color_eyre::Result<()> {
         .parse()
         .expect("expected valid socket address to result from env var PORT");
 
-    let state = State::new().await?.expect("empty bucket");
+    let (state, send_stop) = State::new().await?.expect("empty bucket");
 
     let reload = if state.tigris_token.is_none() {
         let (send_stop, mut recv_stop) = channel(1);
@@ -80,7 +83,7 @@ pub async fn serve() -> color_eyre::Result<()> {
 
     let http = http1::Builder::new();
     let graceful = hyper_util::server::graceful::GracefulShutdown::new();
-    let mut signal = std::pin::pin!(shutdown_signal(reload));
+    let mut signal = std::pin::pin!(shutdown_signal(reload, send_stop));
 
     let svc = ServeService::new(state);
 
@@ -93,8 +96,10 @@ pub async fn serve() -> color_eyre::Result<()> {
                 let io = TokioIo::new(stream);
                 let svc = svc.clone();
 
-                let conn = http.serve_connection(io, svc);
-                let fut = graceful.watch(conn);
+                let conn = http.serve_connection(io, svc).with_upgrades();
+                //TODO: fix
+                // let fut = graceful.watch(conn);
+                let fut = conn;
 
                 tokio::task::spawn(async move {
                     if let Err(e) = fut

@@ -7,6 +7,10 @@ use hyper::{
     Method, Request, Response, StatusCode,
 };
 use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc};
+use soketto::{
+    handshake::http::{is_upgrade_request, Server},
+};
+use crate::serve::livereload::handle_livereload;
 
 #[derive(Debug, Clone)]
 pub struct ServeService {
@@ -28,10 +32,32 @@ impl Service<Request<Incoming>> for ServeService {
         let state = self.state.clone();
 
         Box::pin(async move {
-            match *req.method() {
-                Method::POST => serve_post(req, state).await,
-                Method::GET | Method::HEAD => serve_get_head(req, state).await,
-                _ => empty_with_code(StatusCode::METHOD_NOT_ALLOWED),
+            //thx https://github.com/paritytech/soketto/blob/master/examples/hyper_server.rs
+            if is_upgrade_request(&req) {
+                let mut handshake_server = Server::new();
+
+                match handshake_server.receive_request(&req) {
+                    Ok(rsp) => {
+                        tokio::spawn(async move {
+                            let reload = state.reload_rx();
+                            let stop = state.stop_rx();
+                            if let Err(e) = handle_livereload(req, handshake_server, stop, reload).await {
+                                error!(?e, "Error with websockets");
+                            }
+                        });
+                        Ok(rsp.map(|()| Full::default()))
+                    },
+                    Err(e) => {
+                        error!(?e, "Couldn't upgrade connection");
+                        empty_with_code(StatusCode::INTERNAL_SERVER_ERROR)
+                    }
+                }
+            } else {
+                match *req.method() {
+                    Method::POST => serve_post(req, state).await,
+                    Method::GET | Method::HEAD => serve_get_head(req, state).await,
+                    _ => empty_with_code(StatusCode::METHOD_NOT_ALLOWED),
+                }
             }
         })
     }

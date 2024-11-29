@@ -8,7 +8,9 @@ use hyper::StatusCode;
 use moka::future::{Cache, CacheBuilder};
 use s3::Bucket;
 use std::{collections::HashSet, env, sync::Arc};
+use tokio::sync::broadcast::{channel, Sender};
 use tokio::sync::RwLock;
+use tokio::sync::broadcast::Receiver;
 
 #[derive(Clone, Debug)]
 pub struct State {
@@ -16,6 +18,8 @@ pub struct State {
     upload_data: Arc<RwLock<UploadData>>,
     cache: Cache<String, (Vec<u8>, String)>,
     pub tigris_token: Option<Arc<str>>,
+    stop_tx: Sender<()>,
+    reload_tx: Sender<()>,
 }
 
 impl State {
@@ -37,7 +41,7 @@ impl State {
     }
 
     #[instrument]
-    pub async fn new() -> color_eyre::Result<Option<Self>> {
+    pub async fn new() -> color_eyre::Result<Option<(Self, Sender<()>)>> {
         let bucket = get_bucket();
         let Some(upload_data) = get_upload_data(&bucket).await? else {
             return Ok(None);
@@ -88,12 +92,24 @@ impl State {
             info!("Read files from S3");
         });
 
-        Ok(Some(Self {
+        let (stop_tx, _stop_rx) = channel(1);
+        let (reload_tx, _reload_rx) = channel(1);
+
+        Ok(Some((Self {
             bucket,
             upload_data: Arc::new(RwLock::new(upload_data)),
             cache,
             tigris_token,
-        }))
+            stop_tx: stop_tx.clone(),
+            reload_tx
+        }, stop_tx)))
+    }
+
+    pub fn reload_rx (&self) -> Receiver<()> {
+        self.reload_tx.subscribe()
+    }
+    pub fn stop_rx (&self) -> Receiver<()> {
+        self.stop_tx.subscribe()
     }
 
     #[instrument(skip(self))]
@@ -137,6 +153,7 @@ impl State {
 
         let task_cache = self.cache.clone();
         let task_bucket = self.bucket.clone();
+        let task_reload = self.reload_tx.clone();
         tokio::task::spawn(async move {
             let mut read_files: FuturesUnordered<_> = to_be_updated
                 .into_iter()
@@ -156,6 +173,7 @@ impl State {
             }
 
             info!("Updated cache from S3");
+            let _ = task_reload.send(()); //no receivers just means that there aren't any clients, which is fine
         });
 
         Ok(())
