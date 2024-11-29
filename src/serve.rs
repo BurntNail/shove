@@ -1,8 +1,8 @@
+mod livereload;
 mod service;
 mod state;
-mod livereload;
 
-use crate::serve::{service::ServeService, state::State};
+use crate::serve::{livereload::LiveReloader, service::ServeService, state::State};
 use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
 use std::{env::var, net::SocketAddr, time::Duration};
@@ -10,14 +10,12 @@ use tokio::{
     net::TcpListener,
     signal,
     sync::mpsc::{channel, Sender as MPSCSender},
-    task::JoinHandle,
+    task::{JoinHandle, JoinSet},
 };
-use tokio::task::JoinSet;
-use crate::serve::livereload::LiveReloader;
 
 enum Reloader {
     Interval(JoinHandle<()>, MPSCSender<()>),
-    Waiting(LiveReloader)
+    Waiting(LiveReloader),
 }
 
 //from https://github.com/tokio-rs/axum/blob/main/examples/graceful-shutdown/src/main.rs
@@ -51,8 +49,10 @@ async fn shutdown_signal(reload_stop: Reloader) {
                 error!(?e, "Error awaiting for reload thread handle");
             }
         }
-        Reloader::Waiting(livereload) => if let Err(e) = livereload.send_stop().await {
-            error!(?e, "Error stopping live reloader");
+        Reloader::Waiting(livereload) => {
+            if let Err(e) = livereload.send_stop().await {
+                error!(?e, "Error stopping live reloader");
+            }
         }
     }
 }

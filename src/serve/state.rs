@@ -1,5 +1,6 @@
 use crate::{
     s3::{get_bucket, get_upload_data},
+    serve::livereload::LiveReloader,
     UploadData,
 };
 use color_eyre::eyre::bail;
@@ -9,7 +10,6 @@ use moka::future::{Cache, CacheBuilder};
 use s3::Bucket;
 use std::{collections::HashSet, env, sync::Arc};
 use tokio::sync::RwLock;
-use crate::serve::livereload::LiveReloader;
 
 #[derive(Clone, Debug)]
 pub struct State {
@@ -97,11 +97,11 @@ impl State {
             upload_data: Arc::new(RwLock::new(upload_data)),
             cache,
             tigris_token,
-            live_reloader
+            live_reloader,
         }))
     }
 
-    pub fn live_reloader (&self) -> LiveReloader {
+    pub fn live_reloader(&self) -> LiveReloader {
         self.live_reloader.clone()
     }
 

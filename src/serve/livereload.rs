@@ -1,16 +1,15 @@
-use std::sync::Arc;
 use color_eyre::eyre::bail;
-use hyper::body::Incoming;
-use hyper::Request;
+use futures::{
+    io::{BufReader, BufWriter},
+    stream::FuturesUnordered,
+    StreamExt,
+};
+use hyper::{body::Incoming, upgrade::Upgraded, Request};
 use hyper_util::rt::TokioIo;
-use soketto::handshake::http::Server;
+use soketto::{handshake::http::Server, Sender};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt};
-use futures::io::{BufWriter, BufReader};
-use futures::stream::FuturesUnordered;
-use futures::StreamExt;
-use hyper::upgrade::Upgraded;
-use soketto::{Sender};
-use tokio::sync::{Mutex};
 
 type WSSender = Sender<BufReader<BufWriter<Compat<TokioIo<Upgraded>>>>>;
 
@@ -20,13 +19,17 @@ pub struct LiveReloader {
 }
 
 impl LiveReloader {
-    pub fn new () -> Self {
+    pub fn new() -> Self {
         Self {
             senders: Arc::new(Mutex::new(vec![])),
         }
     }
 
-    pub async fn handle_livereload (&self, req: Request<Incoming>, server: Server) -> color_eyre::Result<()> {
+    pub async fn handle_livereload(
+        &self,
+        req: Request<Incoming>,
+        server: Server,
+    ) -> color_eyre::Result<()> {
         let stream = hyper::upgrade::on(req).await?;
         let io = TokioIo::new(stream);
         let stream = BufReader::new(BufWriter::new(io.compat()));
@@ -38,8 +41,8 @@ impl LiveReloader {
         Ok(())
     }
 
-    pub async fn send_reload (&self) -> color_eyre::Result<()> {
-        async fn reload (mut sender: WSSender) -> color_eyre::Result<()> {
+    pub async fn send_reload(&self) -> color_eyre::Result<()> {
+        async fn reload(mut sender: WSSender) -> color_eyre::Result<()> {
             sender.send_text("reload").await?;
             sender.flush().await?;
             sender.close().await?;
@@ -62,8 +65,8 @@ impl LiveReloader {
         Ok(())
     }
 
-    pub async fn send_stop (&self) -> color_eyre::Result<()> {
-        async fn stop (mut sender: WSSender) -> color_eyre::Result<()> {
+    pub async fn send_stop(&self) -> color_eyre::Result<()> {
+        async fn stop(mut sender: WSSender) -> color_eyre::Result<()> {
             sender.close().await?;
             Ok(())
         }

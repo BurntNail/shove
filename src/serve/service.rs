@@ -6,10 +6,8 @@ use hyper::{
     service::Service,
     Method, Request, Response, StatusCode,
 };
+use soketto::handshake::http::{is_upgrade_request, Server};
 use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc};
-use soketto::{
-    handshake::http::{is_upgrade_request, Server},
-};
 
 #[derive(Debug, Clone)]
 pub struct ServeService {
@@ -39,12 +37,14 @@ impl Service<Request<Incoming>> for ServeService {
                 match handshake_server.receive_request(&req) {
                     Ok(rsp) => {
                         tokio::spawn(async move {
-                            if let Err(e) = livereload.handle_livereload(req, handshake_server).await {
+                            if let Err(e) =
+                                livereload.handle_livereload(req, handshake_server).await
+                            {
                                 error!(?e, "Error with websockets");
                             }
                         });
                         Ok(rsp.map(|()| Full::default()))
-                    },
+                    }
                     Err(e) => {
                         error!(?e, "Couldn't upgrade connection");
                         empty_with_code(StatusCode::INTERNAL_SERVER_ERROR)
@@ -84,12 +84,12 @@ async fn serve_post(
             let provided_auth_token = match headers.get("Authorization").cloned() {
                 Some(x) => match x.to_str() {
                     Ok(x) => match x.strip_prefix("Bearer ") {
-                    	Some(x) => Arc::<str>::from(x),
-                    	None => {
-                    		warn!("Unable to find Bearer part");
-                        	return empty_with_code(StatusCode::BAD_REQUEST);
-                    	}
-                    }
+                        Some(x) => Arc::<str>::from(x),
+                        None => {
+                            warn!("Unable to find Bearer part");
+                            return empty_with_code(StatusCode::BAD_REQUEST);
+                        }
+                    },
                     Err(e) => {
                         warn!(?e, "Error converting auth token to string");
                         return empty_with_code(StatusCode::BAD_REQUEST);
