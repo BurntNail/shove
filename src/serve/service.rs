@@ -10,7 +10,6 @@ use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc};
 use soketto::{
     handshake::http::{is_upgrade_request, Server},
 };
-use crate::serve::livereload::handle_livereload;
 
 #[derive(Debug, Clone)]
 pub struct ServeService {
@@ -30,6 +29,7 @@ impl Service<Request<Incoming>> for ServeService {
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
         let state = self.state.clone();
+        let livereload = state.live_reloader();
 
         Box::pin(async move {
             //thx https://github.com/paritytech/soketto/blob/master/examples/hyper_server.rs
@@ -39,9 +39,7 @@ impl Service<Request<Incoming>> for ServeService {
                 match handshake_server.receive_request(&req) {
                     Ok(rsp) => {
                         tokio::spawn(async move {
-                            let reload = state.reload_rx();
-                            let stop = state.stop_rx();
-                            if let Err(e) = handle_livereload(req, handshake_server, stop, reload).await {
+                            if let Err(e) = livereload.handle_livereload(req, handshake_server).await {
                                 error!(?e, "Error with websockets");
                             }
                         });

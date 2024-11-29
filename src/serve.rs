@@ -10,13 +10,18 @@ use tokio::{
     net::TcpListener,
     signal,
     sync::mpsc::{channel, Sender as MPSCSender},
-    sync::broadcast::Sender as BCSender,
     task::JoinHandle,
 };
 use tokio::task::JoinSet;
+use crate::serve::livereload::LiveReloader;
+
+enum Reloader {
+    Interval(JoinHandle<()>, MPSCSender<()>),
+    Waiting(LiveReloader)
+}
 
 //from https://github.com/tokio-rs/axum/blob/main/examples/graceful-shutdown/src/main.rs
-async fn shutdown_signal(stop: Option<(JoinHandle<()>, MPSCSender<()>)>, stop_state: BCSender<()>) {
+async fn shutdown_signal(reload_stop: Reloader) {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -39,12 +44,16 @@ async fn shutdown_signal(stop: Option<(JoinHandle<()>, MPSCSender<()>)>, stop_st
         () = terminate => {},
     }
 
-    let _ = stop_state.send(());
-    if let Some((handle, send)) = stop {
-        send.send(())
-            .await
-            .expect("unable to send stop signal to reloader thread");
-        handle.await.expect("error in reloader thread");
+    match reload_stop {
+        Reloader::Interval(handle, send) => {
+            let _ = send.send(()).await;
+            if let Err(e) = handle.await {
+                error!(?e, "Error awaiting for reload thread handle");
+            }
+        }
+        Reloader::Waiting(livereload) => if let Err(e) = livereload.send_stop().await {
+            error!(?e, "Error stopping live reloader");
+        }
     }
 }
 
@@ -54,12 +63,12 @@ pub async fn serve() -> color_eyre::Result<()> {
         .parse()
         .expect("expected valid socket address to result from env var PORT");
 
-    let (state, send_stop) = State::new().await?.expect("empty bucket");
+    let state = State::new().await?.expect("empty bucket");
 
     let reload = if state.tigris_token.is_none() {
         let (send_stop, mut recv_stop) = channel(1);
         let reload_state = state.clone();
-        Some((
+        Reloader::Interval(
             tokio::task::spawn(async move {
                 loop {
                     tokio::select! {
@@ -77,13 +86,13 @@ pub async fn serve() -> color_eyre::Result<()> {
                 }
             }),
             send_stop,
-        ))
+        )
     } else {
-        None
+        Reloader::Waiting(state.live_reloader())
     };
 
     let http = http1::Builder::new();
-    let mut signal = std::pin::pin!(shutdown_signal(reload, send_stop));
+    let mut signal = std::pin::pin!(shutdown_signal(reload));
 
     let svc = ServeService::new(state);
 
