@@ -1,3 +1,4 @@
+use color_eyre::eyre::bail;
 use hyper::body::Incoming;
 use hyper::Request;
 use hyper_util::rt::TokioIo;
@@ -31,11 +32,13 @@ pub async fn handle_livereload (req: Request<Incoming>, server: Server, mut stop
             }
             msg = receiver.receive_data(&mut message) => {
                 match msg {
-                    Ok(soketto::Data::Binary(n)) => {
+                    Ok(soketto::Data::Binary(_n)) => {
                         debug!(?message, "Received binary data");
                     }
                     Ok(soketto::Data::Text(n)) => {
-                        assert_eq!(n, message.len());
+                        if n != message.len() {
+                            bail!("Received message where n != message.len()");
+                        }
 
                         if let Ok(txt) = std::str::from_utf8(&message) {
                             trace!(?txt, "Received text data");

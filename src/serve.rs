@@ -13,6 +13,7 @@ use tokio::{
     sync::broadcast::Sender as BCSender,
     task::JoinHandle,
 };
+use tokio::task::JoinSet;
 
 //from https://github.com/tokio-rs/axum/blob/main/examples/graceful-shutdown/src/main.rs
 async fn shutdown_signal(stop: Option<(JoinHandle<()>, MPSCSender<()>)>, stop_state: BCSender<()>) {
@@ -82,13 +83,14 @@ pub async fn serve() -> color_eyre::Result<()> {
     };
 
     let http = http1::Builder::new();
-    let graceful = hyper_util::server::graceful::GracefulShutdown::new();
     let mut signal = std::pin::pin!(shutdown_signal(reload, send_stop));
 
     let svc = ServeService::new(state);
 
     let listener = TcpListener::bind(&addr).await?;
     info!(?addr, "Serving");
+
+    let mut futures = JoinSet::new();
 
     loop {
         tokio::select! {
@@ -97,12 +99,9 @@ pub async fn serve() -> color_eyre::Result<()> {
                 let svc = svc.clone();
 
                 let conn = http.serve_connection(io, svc).with_upgrades();
-                //TODO: fix
-                // let fut = graceful.watch(conn);
-                let fut = conn;
 
-                tokio::task::spawn(async move {
-                    if let Err(e) = fut
+                futures.spawn(async move {
+                    if let Err(e) = conn
                         .await {
                         error!(?e, "Error serving request");
                     }
@@ -116,10 +115,10 @@ pub async fn serve() -> color_eyre::Result<()> {
     }
 
     tokio::select! {
-        _ = graceful.shutdown() => {
+        _ = futures.shutdown() => {
             eprintln!("all connections gracefully closed");
         },
-        _ = tokio::time::sleep(Duration::from_secs(10)) => {
+        _ = tokio::time::sleep(Duration::from_secs(30)) => {
             eprintln!("timed out wait for all connections to close");
         }
     }
