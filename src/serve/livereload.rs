@@ -1,3 +1,4 @@
+use std::time::Duration;
 use hyper::body::Incoming;
 use hyper::Request;
 use hyper_util::rt::TokioIo;
@@ -23,34 +24,36 @@ pub async fn handle_livereload (req: Request<Incoming>, server: Server, mut stop
                 break;
             },
             _ = reload_rx.recv() => {
+                trace!("Reloading");
                 sender.send_text("reload").await?;
+                sender.flush().await?;
+                sender.close().await?;
             }
             msg = receiver.receive_data(&mut message) => {
                 match msg {
                     Ok(soketto::Data::Binary(n)) => {
                         assert_eq!(n, message.len());
 
-                        info!(?message, "Received binary data");
+                        trace!(?message, "Received binary data");
                     }
                     Ok(soketto::Data::Text(n)) => {
                         assert_eq!(n, message.len());
 
                         if let Ok(txt) = std::str::from_utf8(&message) {
-                            info!(?txt, "Received text data");
+                            trace!(?txt, "Received text data");
 
                             if txt == "ping" {
                                 sender.send_text("pong").await?;
                                 sender.flush().await?
                             }
                         } else {
-                            error!("Unable to decode message from WS");
+                            warn!("Unable to decode message from WS");
                             break;
                         }
                     }
                     Err(soketto::connection::Error::Closed) => break,
                     Err(e) => {
-                        error!(?e, "Websocket connection error");
-                        break;
+                        warn!(?e, "Websocket connection error");
                     }
                 }
             }
