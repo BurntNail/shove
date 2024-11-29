@@ -1,19 +1,25 @@
+mod livereload;
 mod service;
 mod state;
 
-use crate::serve::{service::ServeService, state::State};
+use crate::serve::{livereload::LiveReloader, service::ServeService, state::State};
 use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
 use std::{env::var, net::SocketAddr, time::Duration};
 use tokio::{
     net::TcpListener,
     signal,
-    sync::mpsc::{channel, Sender},
-    task::JoinHandle,
+    sync::mpsc::{channel, Sender as MPSCSender},
+    task::{JoinHandle, JoinSet},
 };
 
+enum Reloader {
+    Interval(JoinHandle<()>, MPSCSender<()>),
+    Waiting(LiveReloader),
+}
+
 //from https://github.com/tokio-rs/axum/blob/main/examples/graceful-shutdown/src/main.rs
-async fn shutdown_signal(stop: Option<(JoinHandle<()>, Sender<()>)>) {
+async fn shutdown_signal(reload_stop: Reloader) {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -36,11 +42,18 @@ async fn shutdown_signal(stop: Option<(JoinHandle<()>, Sender<()>)>) {
         () = terminate => {},
     }
 
-    if let Some((handle, send)) = stop {
-        send.send(())
-            .await
-            .expect("unable to send stop signal to reloader thread");
-        handle.await.expect("error in reloader thread");
+    match reload_stop {
+        Reloader::Interval(handle, send) => {
+            let _ = send.send(()).await;
+            if let Err(e) = handle.await {
+                error!(?e, "Error awaiting for reload thread handle");
+            }
+        }
+        Reloader::Waiting(livereload) => {
+            if let Err(e) = livereload.send_stop().await {
+                error!(?e, "Error stopping live reloader");
+            }
+        }
     }
 }
 
@@ -55,7 +68,7 @@ pub async fn serve() -> color_eyre::Result<()> {
     let reload = if state.tigris_token.is_none() {
         let (send_stop, mut recv_stop) = channel(1);
         let reload_state = state.clone();
-        Some((
+        Reloader::Interval(
             tokio::task::spawn(async move {
                 loop {
                     tokio::select! {
@@ -73,13 +86,12 @@ pub async fn serve() -> color_eyre::Result<()> {
                 }
             }),
             send_stop,
-        ))
+        )
     } else {
-        None
+        Reloader::Waiting(state.live_reloader())
     };
 
     let http = http1::Builder::new();
-    let graceful = hyper_util::server::graceful::GracefulShutdown::new();
     let mut signal = std::pin::pin!(shutdown_signal(reload));
 
     let svc = ServeService::new(state);
@@ -87,17 +99,18 @@ pub async fn serve() -> color_eyre::Result<()> {
     let listener = TcpListener::bind(&addr).await?;
     info!(?addr, "Serving");
 
+    let mut futures = JoinSet::new();
+
     loop {
         tokio::select! {
             Ok((stream, _addr)) = listener.accept() => {
                 let io = TokioIo::new(stream);
                 let svc = svc.clone();
 
-                let conn = http.serve_connection(io, svc);
-                let fut = graceful.watch(conn);
+                let conn = http.serve_connection(io, svc).with_upgrades();
 
-                tokio::task::spawn(async move {
-                    if let Err(e) = fut
+                futures.spawn(async move {
+                    if let Err(e) = conn
                         .await {
                         error!(?e, "Error serving request");
                     }
@@ -111,11 +124,11 @@ pub async fn serve() -> color_eyre::Result<()> {
     }
 
     tokio::select! {
-        _ = graceful.shutdown() => {
-            eprintln!("all connections gracefully closed");
+        _ = futures.shutdown() => {
+            info!("all connections gracefully closed");
         },
         _ = tokio::time::sleep(Duration::from_secs(10)) => {
-            eprintln!("timed out wait for all connections to close");
+            error!("timed out wait for all connections to close");
         }
     }
 
