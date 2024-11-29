@@ -1888,6 +1888,7 @@ dependencies = [
  "dialoguer",
  "dotenvy",
  "futures",
+ "getrandom",
  "hmac",
  "http-body-util",
  "hyper 1.5.1",

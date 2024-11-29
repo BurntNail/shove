@@ -1,5 +1,6 @@
-use crate::{serve::serve, upload::upload};
+use crate::{protect::protect, serve::serve, upload::upload};
 use color_eyre::owo_colors::OwoColorize;
+use dialoguer::{theme::ColorfulTheme, Input, Password};
 use dotenvy::var;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -7,15 +8,12 @@ use std::{
     env::{args, current_dir},
     path::PathBuf,
 };
-use dialoguer::{Input, Password};
-use dialoguer::theme::ColorfulTheme;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-use crate::protect::protect;
 
+mod protect;
 pub mod s3;
 mod serve;
 mod upload;
-mod protect;
 
 #[macro_use]
 extern crate tracing;
@@ -71,8 +69,8 @@ pub enum Args {
     Protect {
         pattern: String,
         username: String,
-        password: String
-    }
+        password: String,
+    },
 }
 
 impl Args {
@@ -128,16 +126,26 @@ impl Args {
                 }
                 "protect" => {
                     let theme = ColorfulTheme::default();
-                    let pattern = Input::with_theme(&theme).with_prompt("Pattern to protect?").interact().unwrap();
-                    let username = Input::with_theme(&theme).with_prompt("Username?").interact().unwrap();
+                    let pattern = Input::with_theme(&theme)
+                        .with_prompt("Pattern to protect?")
+                        .interact()
+                        .unwrap();
+                    let username = Input::with_theme(&theme)
+                        .with_prompt("Username?")
+                        .interact()
+                        .unwrap();
                     let password = Password::new()
                         .with_prompt("Password")
                         .with_confirmation("Confirm password", "Passwords mismatching")
                         .interact()
                         .unwrap();
 
-                    return Self::Protect { pattern, username, password};
-                },
+                    return Self::Protect {
+                        pattern,
+                        username,
+                        password,
+                    };
+                }
                 _ => {}
             }
         }
@@ -254,7 +262,11 @@ fn main() {
                 error!(?e, "Error uploading");
             }
         }),
-        Args::Protect {pattern, username, password} => {
+        Args::Protect {
+            pattern,
+            username,
+            password,
+        } => {
             runtime.block_on(async move {
                 if let Err(e) = protect(pattern, username, password).await {
                     error!(?e, "Error protecting");

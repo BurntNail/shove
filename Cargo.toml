@@ -27,3 +27,4 @@ tokio-util = { version = "0.7.12", features = ["compat"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 walkdir = "2.5.0"
+getrandom = "0.2.15"
