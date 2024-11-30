@@ -56,11 +56,11 @@ fn Hi(key: &str, salt: &mut [u8], i: u32) -> color_eyre::Result<Vec<u8>> {
 
 #[derive(Clone)]
 pub struct AuthChecker {
-    //deliberately not using dashmap as i want to be able to replace the entire map
+    //deliberately not using dashmap as I want to be able to replace the entire map
     entries: Arc<RwLock<HashMap<String, UsernameAndPassword>>>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct UsernameAndPassword {
     username: String,
     salt: [u8; 16],
@@ -127,9 +127,9 @@ impl AuthChecker {
 
     pub async fn check_auth (&self, path: &str, req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Request<Incoming>> {
         let readable = self.entries.read().await;
-        let Some((_, UsernameAndPassword {
+        let Some(UsernameAndPassword {
             username, salt, stored_key
-        })) = readable.iter().find(|(pattern, _)| path.contains(pattern.as_str())).cloned() else {
+        }) = readable.iter().find(|(pattern, _)| path.contains(pattern.as_str())).map(|(_, uap)| uap.clone()) else {
             return Err(req);
         };
 
