@@ -17,6 +17,37 @@ fn hmac(key: &[u8], content: &[u8]) -> color_eyre::Result<Vec<u8>> {
     Ok(hmac.finalize().into_bytes().to_vec())
 }
 
+fn h (content: &[u8]) -> Vec<u8> {
+    let mut sha = Sha256::default();
+    sha.update(content);
+    hmac.finalize().into_bytes().to_vec()
+}
+
+fn Hi(key: &str, salt: &mut [u8], i: u32) -> color_eyre::Result<Vec<u8>> {
+    if salt.is_empty() {
+        bail!("Salt cannot be empty");
+    }
+
+    salt[salt.len() - 1] = 1;
+    let mut prev = hmac(key.as_bytes(), &salt)?;
+    let mut all: Vec<Vec<u8>> = vec![prev.clone()];
+    for _ in 1..i {
+        let next = hmac(key.as_bytes(), &prev)?;
+        all.push(next.clone());
+        prev = next;
+    }
+
+    Ok(all
+        .into_iter()
+        .reduce(|acc, item| {
+            acc.into_iter()
+                .zip(item.into_iter())
+                .map(|(a, b)| a.bitxor(b))
+                .collect()
+        })
+        .unwrap())
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Auth {
     entries: HashMap<String, UsernameAndPassword>,
@@ -26,7 +57,7 @@ pub struct Auth {
 struct UsernameAndPassword {
     username: String,
     salt: [u8; 16],
-    scrammed_password: String,
+    stored_key: Vec<u8>,
 }
 
 impl Auth {
@@ -53,45 +84,20 @@ impl Auth {
         username: String,
         password: String,
     ) -> color_eyre::Result<()> {
-        fn Hi(key: &str, salt: &mut [u8], i: u32) -> color_eyre::Result<Vec<u8>> {
-            if salt.is_empty() {
-                bail!("Salt cannot be empty");
-            }
-
-            salt[salt.len() - 1] = 1;
-            let mut prev = hmac(key.as_bytes(), &salt)?;
-            let mut all: Vec<Vec<u8>> = vec![prev.clone()];
-            for _ in 1..i {
-                let next = hmac(key.as_bytes(), &prev)?;
-                all.push(next.clone());
-                prev = next;
-            }
-
-            Ok(all
-                .into_iter()
-                .reduce(|acc, item| {
-                    acc.into_iter()
-                        .zip(item.into_iter())
-                        .map(|(a, b)| a.bitxor(b))
-                        .collect()
-                })
-                .unwrap())
-        }
-
         const I: u32 = 4096;
         let mut salt = [0; 16];
         getrandom(&mut salt)?;
-        let salted_password: String = Hi(&password, &mut salt, I)?
-            .into_iter()
-            .map(|x| format!("{x:x}"))
-            .collect();
+
+        let salted_password = Hi(&password, &mut salt, I)?;
+        let client_key = hmac(&salted_password, b"Client Key")?;
+        let stored_key = h(&client_key);
 
         self.entries.insert(
             pattern,
             UsernameAndPassword {
                 username,
                 salt,
-                scrammed_password: salted_password,
+                stored_key,
             },
         );
 
