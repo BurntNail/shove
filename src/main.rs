@@ -53,7 +53,7 @@ pub fn setup() {
         .with(EnvFilter::from_default_env());
 
     if var("SENTRY_DSN").is_ok() {
-        sub.with(sentry::integrations::tracing::layer()).init()
+        sub.with(sentry::integrations::tracing::layer()).init();
     } else {
         sub.init();
     }
