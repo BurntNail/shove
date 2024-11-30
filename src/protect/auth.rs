@@ -141,12 +141,12 @@ impl AuthChecker {
                 Ok(x) => match x.strip_prefix("Basic ") {
                     Some(x) => x.to_string(),
                     None => {
-                        warn!("Unable to find Basic part");
+                        debug!("Unable to find Basic part");
                         return empty_with_code(StatusCode::UNAUTHORIZED).into();
                     }
                 },
                 Err(e) => {
-                    warn!(?e, "Error converting auth part to string");
+                    debug!(?e, "Error converting auth part to string");
                     return empty_with_code(StatusCode::BAD_REQUEST).into();
                 }
             },
@@ -166,18 +166,18 @@ impl AuthChecker {
             Ok(dec) => match String::from_utf8(dec) {
                 Ok(dec) => dec,
                 Err(e) => {
-                    warn!(?e, "Unable to turn decoded B64 BasicAuth into string");
+                    debug!(?e, "Unable to turn decoded B64 BasicAuth into string");
                     return empty_with_code(StatusCode::BAD_REQUEST).into();
                 }
             },
             Err(e) => {
-                warn!(?e, "Unable to decode B64 BasicAuth");
+                debug!(?e, "Unable to decode B64 BasicAuth");
                 return empty_with_code(StatusCode::BAD_REQUEST).into();
             }
         };
 
         let Some((provided_username, provided_password)) = decoded.split_once(":") else {
-            warn!("Unable to turn Basic auth into username & password");
+            debug!("Unable to turn Basic auth into username & password");
             return empty_with_code(StatusCode::BAD_REQUEST).into();
         };
 
@@ -187,20 +187,20 @@ impl AuthChecker {
                 false
             },
             Err(e) => {
-                warn!(?e, "Error verifiying password");
+                debug!(?e, "Error verifiying password");
                 return empty_with_code(StatusCode::INTERNAL_SERVER_ERROR).into();
             }
         };
 
         if username != provided_username {
-            warn!("Usernames didn't match for auth");
+            debug!("Usernames didn't match for auth");
             return empty_with_code(StatusCode::UNAUTHORIZED).into();
         }
 
         if password_matches {
             AuthReturn::AuthConfirmed(req)
         } else {
-            warn!("Passwords didn't match for auth");
+            debug!("Passwords didn't match for auth");
             empty_with_code(StatusCode::UNAUTHORIZED).into()
         }
     }
