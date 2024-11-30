@@ -135,7 +135,11 @@ async fn serve_get_head(
     };
 
     if cleaned.extension().is_none_or(|x| x.is_empty()) {
-        if path.as_bytes()[path.as_bytes().len() - 1] != b'/' {
+        //ensure that we don't miss zero-index fun
+        #[allow(clippy::if_same_then_else)]
+        if path.is_empty() {
+            path.push('/');
+        } else if path.as_bytes()[path.as_bytes().len() - 1] != b'/' {
             path.push('/');
         }
         path.push_str("index.html");
