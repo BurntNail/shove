@@ -29,3 +29,4 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 walkdir = "2.5.0"
 getrandom = "0.2.15"
 base64 = "0.22.1"
+path-clean = "1.0.1"

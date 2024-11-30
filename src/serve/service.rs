@@ -7,7 +7,9 @@ use hyper::{
     Method, Request, Response, StatusCode,
 };
 use soketto::handshake::http::{is_upgrade_request, Server};
-use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin, sync::Arc};
+use std::path::Path;
+use path_clean::PathClean;
 use crate::protect::auth::AuthReturn;
 use crate::serve::empty_with_code;
 
@@ -123,9 +125,16 @@ async fn serve_get_head(
         return empty_with_code(StatusCode::OK);
     }
 
-    let mut path = path.to_string();
+    let cleaned = Path::new(path).clean();
+    let mut path = match cleaned.to_str() {
+        Some(st) => st.to_owned(),
+        None => {
+            warn!(?cleaned, "Couldn't convert path to string");
+            return empty_with_code(StatusCode::BAD_REQUEST);
+        }
+    };
 
-    if PathBuf::from(&path)
+    if cleaned
         .extension()
         .is_none_or(|x| x.is_empty())
     {

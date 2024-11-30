@@ -13,7 +13,6 @@ use hyper::body::{Bytes, Incoming};
 use hyper::{http, Request, Response, StatusCode};
 use s3::Bucket;
 use s3::error::S3Error;
-use sentry::types::Auth;
 use tokio::sync::RwLock;
 use crate::serve::empty_with_code;
 

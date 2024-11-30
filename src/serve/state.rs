@@ -5,12 +5,11 @@ use crate::{
 };
 use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
-use hyper::{Request, Response, StatusCode};
+use hyper::{Request, StatusCode};
 use moka::future::{Cache, CacheBuilder};
 use s3::Bucket;
 use std::{collections::HashSet, env, sync::Arc};
-use http_body_util::Full;
-use hyper::body::{Bytes, Incoming};
+use hyper::body::Incoming;
 use tokio::sync::RwLock;
 use crate::protect::auth::{AuthChecker, AuthReturn};
 
