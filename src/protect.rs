@@ -1,5 +1,4 @@
-use crate::protect::auth::AuthChecker;
-use crate::s3::get_bucket;
+use crate::{protect::auth::AuthChecker, s3::get_bucket};
 
 pub mod auth;
 

@@ -1,17 +1,16 @@
 use crate::{
+    protect::auth::{AuthChecker, AuthReturn},
     s3::{get_bucket, get_upload_data},
     serve::livereload::LiveReloader,
     UploadData,
 };
 use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
-use hyper::{Request, StatusCode};
+use hyper::{body::Incoming, Request, StatusCode};
 use moka::future::{Cache, CacheBuilder};
 use s3::Bucket;
 use std::{collections::HashSet, env, sync::Arc};
-use hyper::body::Incoming;
 use tokio::sync::RwLock;
-use crate::protect::auth::{AuthChecker, AuthReturn};
 
 #[derive(Clone)]
 pub struct State {
@@ -102,7 +101,7 @@ impl State {
             cache,
             tigris_token,
             live_reloader,
-            auth
+            auth,
         }))
     }
 
@@ -220,7 +219,7 @@ impl State {
         }
     }
 
-    pub async fn check_auth (&self, path: &str, req: Request<Incoming>) -> AuthReturn {
+    pub async fn check_auth(&self, path: &str, req: Request<Incoming>) -> AuthReturn {
         self.auth.check_auth(path, req).await
     }
 }

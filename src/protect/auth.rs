@@ -1,20 +1,19 @@
+use crate::serve::empty_with_code;
+use base64::{prelude::BASE64_STANDARD, Engine};
 use color_eyre::eyre::bail;
 use getrandom::getrandom;
 use hmac::{Hmac, Mac};
+use http_body_util::Full;
+use hyper::{
+    body::{Bytes, Incoming},
+    http, Request, Response, StatusCode,
+};
+use s3::{error::S3Error, Bucket};
 use serde::{Deserialize, Serialize};
 use serde_json::from_slice;
-use sha2::{Sha256, Digest};
-use std::{collections::HashMap, ops::BitXor};
-use std::sync::Arc;
-use base64::{Engine};
-use base64::prelude::BASE64_STANDARD;
-use http_body_util::Full;
-use hyper::body::{Bytes, Incoming};
-use hyper::{http, Request, Response, StatusCode};
-use s3::Bucket;
-use s3::error::S3Error;
+use sha2::{Digest, Sha256};
+use std::{collections::HashMap, ops::BitXor, sync::Arc};
 use tokio::sync::RwLock;
-use crate::serve::empty_with_code;
 
 pub const AUTH_DATA_LOCATION: &str = "auth_data.json";
 const I: u32 = 4096;
@@ -27,7 +26,7 @@ fn hmac(key: &[u8], content: &[u8]) -> color_eyre::Result<Vec<u8>> {
     Ok(hmac.finalize().into_bytes().to_vec())
 }
 
-fn h (content: &[u8]) -> Vec<u8> {
+fn h(content: &[u8]) -> Vec<u8> {
     let mut sha = Sha256::default();
     sha.update(content);
     sha.finalize().to_vec()
@@ -40,7 +39,7 @@ fn Hi(key: &str, salt: &[u8], i: u32) -> color_eyre::Result<Vec<u8>> {
     }
 
     let mut salt = salt.to_vec();
-    let mut prev = hmac(key.as_bytes(), &mut salt)?;
+    let mut prev = hmac(key.as_bytes(), &salt)?;
     let mut all: Vec<Vec<u8>> = vec![prev.clone()];
     for _ in 1..i {
         let next = hmac(key.as_bytes(), &prev)?;
@@ -68,7 +67,7 @@ pub struct AuthChecker {
 pub enum AuthReturn {
     AuthConfirmed(Request<Incoming>),
     ResponseFromAuth(Response<Full<Bytes>>),
-    Error(http::Error)
+    Error(http::Error),
 }
 
 impl From<Result<Response<Full<Bytes>>, http::Error>> for AuthReturn {
@@ -97,13 +96,10 @@ impl AuthChecker {
 
         let entries = Arc::new(RwLock::new(entries.unwrap_or_default()));
 
-
-        Ok(Self {
-            entries
-        })
+        Ok(Self { entries })
     }
 
-    pub async fn reload (&self, bucket: &Bucket) -> color_eyre::Result<()> {
+    pub async fn reload(&self, bucket: &Bucket) -> color_eyre::Result<()> {
         let file_contents = bucket.get_object(AUTH_DATA_LOCATION).await?.to_vec();
         let entries = from_slice(&file_contents)?;
 
@@ -149,11 +145,17 @@ impl AuthChecker {
         Ok(())
     }
 
-    pub async fn check_auth (&self, path: &str, req: Request<Incoming>) -> AuthReturn {
+    pub async fn check_auth(&self, path: &str, req: Request<Incoming>) -> AuthReturn {
         let readable = self.entries.read().await;
         let Some(UsernameAndPassword {
-                     username, salt, stored_key
-                 }) = readable.iter().find(|(pattern, _)| path.contains(pattern.as_str())).map(|(_, uap)| uap.clone()) else {
+            username,
+            salt,
+            stored_key,
+        }) = readable
+            .iter()
+            .find(|(pattern, _)| path.contains(pattern.as_str()))
+            .map(|(_, uap)| uap.clone())
+        else {
             return AuthReturn::AuthConfirmed(req);
         };
 
@@ -174,10 +176,14 @@ impl AuthChecker {
             },
             None => {
                 return Response::builder()
-                    .header("WWW-Authenticate", format!("Basic realm={path:?} charset=\"UTF-8\""))
+                    .header(
+                        "WWW-Authenticate",
+                        format!("Basic realm={path:?} charset=\"UTF-8\""),
+                    )
                     .status(StatusCode::UNAUTHORIZED)
-                    .body(Full::default()).into();
-            },
+                    .body(Full::default())
+                    .into();
+            }
         };
 
         let decoded = match BASE64_STANDARD.decode(&provided_auth_b64) {
@@ -187,7 +193,7 @@ impl AuthChecker {
                     warn!(?e, "Unable to turn decoded B64 BasicAuth into string");
                     return empty_with_code(StatusCode::BAD_REQUEST).into();
                 }
-            }
+            },
             Err(e) => {
                 warn!(?e, "Unable to decode B64 BasicAuth");
                 return empty_with_code(StatusCode::BAD_REQUEST).into();
@@ -204,7 +210,7 @@ impl AuthChecker {
             return empty_with_code(StatusCode::UNAUTHORIZED).into();
         }
 
-        let salted_password = match Hi(&provided_password, &salt, I) {
+        let salted_password = match Hi(provided_password, &salt, I) {
             Ok(x) => x,
             Err(e) => {
                 error!(?e, "Error hashing provided password");
@@ -219,7 +225,6 @@ impl AuthChecker {
             }
         };
         let provided_stored_key = h(&client_key);
-
 
         if provided_stored_key != stored_key {
             warn!("Passwords didn't match for auth");

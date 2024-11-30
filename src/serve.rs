@@ -3,12 +3,10 @@ mod service;
 mod state;
 
 use crate::serve::{livereload::LiveReloader, service::ServeService, state::State};
-use hyper::server::conn::http1;
+use http_body_util::Full;
+use hyper::{body::Bytes, http, server::conn::http1, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use std::{env::var, net::SocketAddr, time::Duration};
-use http_body_util::Full;
-use hyper::body::Bytes;
-use hyper::{http, Response, StatusCode};
 use tokio::{
     net::TcpListener,
     signal,

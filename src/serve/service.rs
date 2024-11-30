@@ -1,4 +1,7 @@
-use crate::serve::state::State;
+use crate::{
+    protect::auth::AuthReturn,
+    serve::{empty_with_code, state::State},
+};
 use http_body_util::Full;
 use hyper::{
     body::{Bytes, Incoming},
@@ -6,12 +9,9 @@ use hyper::{
     service::Service,
     Method, Request, Response, StatusCode,
 };
-use soketto::handshake::http::{is_upgrade_request, Server};
-use std::{future::Future, pin::Pin, sync::Arc};
-use std::path::Path;
 use path_clean::PathClean;
-use crate::protect::auth::AuthReturn;
-use crate::serve::empty_with_code;
+use soketto::handshake::http::{is_upgrade_request, Server};
+use std::{future::Future, path::Path, pin::Pin, sync::Arc};
 
 #[derive(Clone)]
 pub struct ServeService {
@@ -134,10 +134,7 @@ async fn serve_get_head(
         }
     };
 
-    if cleaned
-        .extension()
-        .is_none_or(|x| x.is_empty())
-    {
+    if cleaned.extension().is_none_or(|x| x.is_empty()) {
         if path.as_bytes()[path.as_bytes().len() - 1] != b'/' {
             path.push('/');
         }
@@ -147,7 +144,7 @@ async fn serve_get_head(
     let req = match state.check_auth(&path, req).await {
         AuthReturn::AuthConfirmed(req) => req,
         AuthReturn::ResponseFromAuth(rsp) => return Ok(rsp),
-        AuthReturn::Error(e) => return Err(e)
+        AuthReturn::Error(e) => return Err(e),
     };
 
     trace!(?path, "Serving");
