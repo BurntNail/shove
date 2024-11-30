@@ -5,19 +5,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::from_slice;
 use sha2::{Sha256, Digest};
 use std::{collections::HashMap, ops::BitXor};
-use std::string::FromUtf8Error;
 use std::sync::Arc;
-use base64::{DecodeError, Engine};
+use base64::{Engine};
 use base64::prelude::BASE64_STANDARD;
 use http_body_util::Full;
 use hyper::body::{Bytes, Incoming};
 use hyper::{http, Request, Response, StatusCode};
 use s3::Bucket;
 use s3::error::S3Error;
+use sentry::types::Auth;
 use tokio::sync::RwLock;
 use crate::serve::empty_with_code;
 
 pub const AUTH_DATA_LOCATION: &str = "auth_data.json";
+const I: u32 = 4096;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -34,13 +35,13 @@ fn h (content: &[u8]) -> Vec<u8> {
 }
 
 #[allow(non_snake_case)]
-fn Hi(key: &str, salt: &mut [u8], i: u32) -> color_eyre::Result<Vec<u8>> {
+fn Hi(key: &str, salt: &[u8], i: u32) -> color_eyre::Result<Vec<u8>> {
     if salt.is_empty() {
         bail!("Salt cannot be empty");
     }
 
-    salt[salt.len() - 1] = 1;
-    let mut prev = hmac(key.as_bytes(), salt)?;
+    let mut salt = salt.to_vec();
+    let mut prev = hmac(key.as_bytes(), &mut salt)?;
     let mut all: Vec<Vec<u8>> = vec![prev.clone()];
     for _ in 1..i {
         let next = hmac(key.as_bytes(), &prev)?;
@@ -66,9 +67,18 @@ pub struct AuthChecker {
 }
 
 pub enum AuthReturn {
-    NoAuthNeeded(Request<Incoming>),
-    AuthedResponse(Response<Full<Bytes>>),
+    AuthConfirmed(Request<Incoming>),
+    ResponseFromAuth(Response<Full<Bytes>>),
     Error(http::Error)
+}
+
+impl From<Result<Response<Full<Bytes>>, http::Error>> for AuthReturn {
+    fn from(value: Result<Response<Full<Bytes>>, http::Error>) -> Self {
+        match value {
+            Ok(x) => Self::ResponseFromAuth(x),
+            Err(e) => Self::Error(e),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -119,11 +129,10 @@ impl AuthChecker {
         username: String,
         password: String,
     ) -> color_eyre::Result<()> {
-        const I: u32 = 4096;
         let mut salt = [0; 16];
         getrandom(&mut salt)?;
 
-        let salted_password = Hi(&password, &mut salt, I)?;
+        let salted_password = Hi(&password, &salt, I)?;
         let client_key = hmac(&salted_password, b"Client Key")?;
         let stored_key = h(&client_key);
 
@@ -142,74 +151,82 @@ impl AuthChecker {
     }
 
     pub async fn check_auth (&self, path: &str, req: Request<Incoming>) -> AuthReturn {
-        async fn check_once_confirmed (path: &str, req: Request<Incoming>, UsernameAndPassword { username, salt, stored_key }: UsernameAndPassword) -> Result<Response<Full<Bytes>>, http::Error> {
-            let headers = req.headers();
-            let provided_auth_b64 = match headers.get("Authorization").cloned() {
-                Some(x) => match x.to_str() {
-                    Ok(x) => match x.strip_prefix("SCRAM-SHA-256 ") {
-                        Some(x) => x.to_string(),
-                        None => {
-                            warn!("Unable to find SCRAM part");
-                            return empty_with_code(StatusCode::UNAUTHORIZED);
-                        }
-                    },
-                    Err(e) => {
-                        warn!(?e, "Error converting auth token to string");
-                        return empty_with_code(StatusCode::BAD_REQUEST);
-                    }
-                },
-                None => {
-                    return Response::builder()
-                        .header("WWW-Authenticate", format!("SCRAM-SHA-256 realm={path:?}"))
-                        .status(StatusCode::UNAUTHORIZED)
-                        .body(Full::default());
-                },
-            };
-
-            let decoded = match BASE64_STANDARD.decode(&provided_auth_b64) {
-                Ok(dec) => match String::from_utf8(dec) {
-                    Ok(dec) => dec,
-                    Err(e) => {
-                        warn!(?e, "Unable to turn decoded B64 SCRAM into string");
-                        return empty_with_code(StatusCode::BAD_REQUEST);
-                    }
-                }
-                Err(e) => {
-                    warn!(?e, "Unable to decode B64 SCRAM");
-                    return empty_with_code(StatusCode::BAD_REQUEST);
-                }
-            };
-
-            // let (provided_username, nonce) = {
-                let mut parts = decoded.split(',');
-
-                panic!("{:?}", parts.collect::<Vec<_>>());
-
-                let Some(channel_binding) = parts.next() else {
-                    warn!("Scram missing channel binding part");
-                    return empty_with_code(StatusCode::BAD_REQUEST);
-                };
-                if channel_binding != "n" {
-                    warn!("Scram channel binding not 'n', failing");
-                    return empty_with_code(StatusCode::BAD_REQUEST);
-                }
-
-
-
-            // };
-
-
-            todo!()
-        }
-
         let readable = self.entries.read().await;
-        let Some(uap) = readable.iter().find(|(pattern, _)| path.contains(pattern.as_str())).map(|(_, uap)| uap.clone()) else {
-            return AuthReturn::NoAuthNeeded(req);
+        let Some(UsernameAndPassword {
+                     username, salt, stored_key
+                 }) = readable.iter().find(|(pattern, _)| path.contains(pattern.as_str())).map(|(_, uap)| uap.clone()) else {
+            return AuthReturn::AuthConfirmed(req);
         };
 
-        match check_once_confirmed(path, req, uap).await {
-            Ok(rsp) => AuthReturn::AuthedResponse(rsp),
-            Err(e) => AuthReturn::Error(e),
+        let headers = req.headers();
+        let provided_auth_b64 = match headers.get("Authorization").cloned() {
+            Some(x) => match x.to_str() {
+                Ok(x) => match x.strip_prefix("Basic ") {
+                    Some(x) => x.to_string(),
+                    None => {
+                        warn!("Unable to find Basic part");
+                        return empty_with_code(StatusCode::UNAUTHORIZED).into();
+                    }
+                },
+                Err(e) => {
+                    warn!(?e, "Error converting auth part to string");
+                    return empty_with_code(StatusCode::BAD_REQUEST).into();
+                }
+            },
+            None => {
+                return Response::builder()
+                    .header("WWW-Authenticate", format!("Basic realm={path:?} charset=\"UTF-8\""))
+                    .status(StatusCode::UNAUTHORIZED)
+                    .body(Full::default()).into();
+            },
+        };
+
+        let decoded = match BASE64_STANDARD.decode(&provided_auth_b64) {
+            Ok(dec) => match String::from_utf8(dec) {
+                Ok(dec) => dec,
+                Err(e) => {
+                    warn!(?e, "Unable to turn decoded B64 BasicAuth into string");
+                    return empty_with_code(StatusCode::BAD_REQUEST).into();
+                }
+            }
+            Err(e) => {
+                warn!(?e, "Unable to decode B64 BasicAuth");
+                return empty_with_code(StatusCode::BAD_REQUEST).into();
+            }
+        };
+
+        let Some((provided_username, provided_password)) = decoded.split_once(":") else {
+            warn!("Unable to turn Basic auth into username & password");
+            return empty_with_code(StatusCode::BAD_REQUEST).into();
+        };
+
+        if username != provided_username {
+            warn!("Usernames didn't match for auth");
+            return empty_with_code(StatusCode::UNAUTHORIZED).into();
+        }
+
+        let salted_password = match Hi(&provided_password, &salt, I) {
+            Ok(x) => x,
+            Err(e) => {
+                error!(?e, "Error hashing provided password");
+                return empty_with_code(StatusCode::INTERNAL_SERVER_ERROR).into();
+            }
+        };
+        let client_key = match hmac(&salted_password, b"Client Key") {
+            Ok(x) => x,
+            Err(e) => {
+                error!(?e, "Error hashing client key");
+                return empty_with_code(StatusCode::INTERNAL_SERVER_ERROR).into();
+            }
+        };
+        let provided_stored_key = h(&client_key);
+
+
+        if provided_stored_key != stored_key {
+            warn!("Passwords didn't match for auth");
+            empty_with_code(StatusCode::UNAUTHORIZED).into()
+        } else {
+            AuthReturn::AuthConfirmed(req)
         }
     }
 }

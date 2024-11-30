@@ -136,8 +136,8 @@ async fn serve_get_head(
     }
 
     let req = match state.check_auth(&path, req).await {
-        AuthReturn::NoAuthNeeded(req) => req,
-        AuthReturn::AuthedResponse(rsp) => return Ok(rsp),
+        AuthReturn::AuthConfirmed(req) => req,
+        AuthReturn::ResponseFromAuth(rsp) => return Ok(rsp),
         AuthReturn::Error(e) => return Err(e)
     };
 
