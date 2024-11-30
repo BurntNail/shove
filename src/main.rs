@@ -65,7 +65,7 @@ pub fn setup() {
 pub enum Args {
     Serve,
     Upload(String),
-    Protect
+    Protect,
 }
 
 impl Args {

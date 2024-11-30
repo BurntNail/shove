@@ -1,4 +1,8 @@
 use crate::serve::empty_with_code;
+use argon2::{
+    password_hash::{Error, SaltString},
+    Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
+};
 use base64::{prelude::BASE64_STANDARD, Engine};
 use getrandom::getrandom;
 use http_body_util::Full;
@@ -10,8 +14,6 @@ use s3::{error::S3Error, Bucket};
 use serde::{Deserialize, Serialize};
 use serde_json::from_slice;
 use std::{collections::HashMap, sync::Arc};
-use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
-use argon2::password_hash::{Error, SaltString};
 use tokio::sync::RwLock;
 
 pub const AUTH_DATA_LOCATION: &str = "auth_data.json";
@@ -61,10 +63,13 @@ impl AuthChecker {
         entries.remove(pattern);
     }
 
-    pub async fn get_patterns_and_usernames (&self) -> Vec<(String, String)> {
-        self.entries.read().await.iter().map(|(pat, uap)| {
-            (pat.clone(), uap.username.clone())
-        }).collect()
+    pub async fn get_patterns_and_usernames(&self) -> Vec<(String, String)> {
+        self.entries
+            .read()
+            .await
+            .iter()
+            .map(|(pat, uap)| (pat.clone(), uap.username.clone()))
+            .collect()
     }
 
     pub async fn reload(&self, bucket: &Bucket) -> color_eyre::Result<()> {
@@ -181,16 +186,15 @@ impl AuthChecker {
             return empty_with_code(StatusCode::BAD_REQUEST).into();
         };
 
-        let password_matches = match argon.verify_password(provided_password.as_bytes(), &password_hash) {
-            Ok(()) => true,
-            Err(Error::Password) => {
-                false
-            },
-            Err(e) => {
-                debug!(?e, "Error verifiying password");
-                return empty_with_code(StatusCode::INTERNAL_SERVER_ERROR).into();
-            }
-        };
+        let password_matches =
+            match argon.verify_password(provided_password.as_bytes(), &password_hash) {
+                Ok(()) => true,
+                Err(Error::Password) => false,
+                Err(e) => {
+                    debug!(?e, "Error verifiying password");
+                    return empty_with_code(StatusCode::INTERNAL_SERVER_ERROR).into();
+                }
+            };
 
         if username != provided_username {
             debug!("Usernames didn't match for auth");
