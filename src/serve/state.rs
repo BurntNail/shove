@@ -12,7 +12,7 @@ use std::{collections::HashSet, env, sync::Arc};
 use http_body_util::Full;
 use hyper::body::{Bytes, Incoming};
 use tokio::sync::RwLock;
-use crate::protect::auth::AuthChecker;
+use crate::protect::auth::{AuthChecker, AuthReturn};
 
 #[derive(Clone)]
 pub struct State {
@@ -221,7 +221,7 @@ impl State {
         }
     }
 
-    pub async fn check_auth (&self, path: &str, req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Request<Incoming>> {
+    pub async fn check_auth (&self, path: &str, req: Request<Incoming>) -> AuthReturn {
         self.auth.check_auth(path, req).await
     }
 }

@@ -12,7 +12,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 
 pub mod protect;
 pub mod s3;
-mod serve;
+pub mod serve;
 mod upload;
 
 #[macro_use]

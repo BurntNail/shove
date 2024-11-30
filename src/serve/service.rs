@@ -8,6 +8,8 @@ use hyper::{
 };
 use soketto::handshake::http::{is_upgrade_request, Server};
 use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc};
+use crate::protect::auth::AuthReturn;
+use crate::serve::empty_with_code;
 
 #[derive(Clone)]
 pub struct ServeService {
@@ -59,10 +61,6 @@ impl Service<Request<Incoming>> for ServeService {
             }
         })
     }
-}
-
-fn empty_with_code(code: StatusCode) -> Result<Response<Full<Bytes>>, http::Error> {
-    Response::builder().status(code).body(Full::default())
 }
 
 #[instrument(skip(state, req))]
@@ -138,8 +136,9 @@ async fn serve_get_head(
     }
 
     let req = match state.check_auth(&path, req).await {
-        Ok(rsp) => return Ok(rsp),
-        Err(req) => req
+        AuthReturn::NoAuthNeeded(req) => req,
+        AuthReturn::AuthedResponse(rsp) => return Ok(rsp),
+        AuthReturn::Error(e) => return Err(e)
     };
 
     trace!(?path, "Serving");
