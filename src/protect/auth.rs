@@ -38,7 +38,7 @@ fn Hi(key: &str, salt: &[u8], i: u32) -> color_eyre::Result<Vec<u8>> {
         bail!("Salt cannot be empty");
     }
 
-    let mut salt = salt.to_vec();
+    let salt = salt.to_vec();
     let mut prev = hmac(key.as_bytes(), &salt)?;
     let mut all: Vec<Vec<u8>> = vec![prev.clone()];
     for _ in 1..i {
@@ -97,6 +97,17 @@ impl AuthChecker {
         let entries = Arc::new(RwLock::new(entries.unwrap_or_default()));
 
         Ok(Self { entries })
+    }
+
+    pub async fn rm_pattern(&self, pattern: &str) {
+        let mut entries = self.entries.write().await;
+        entries.remove(pattern);
+    }
+
+    pub async fn get_patterns_and_usernames (&self) -> Vec<(String, String)> {
+        self.entries.read().await.iter().map(|(pat, uap)| {
+            (pat.clone(), uap.username.clone())
+        }).collect()
     }
 
     pub async fn reload(&self, bucket: &Bucket) -> color_eyre::Result<()> {
