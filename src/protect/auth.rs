@@ -1,8 +1,6 @@
 use crate::serve::empty_with_code;
 use base64::{prelude::BASE64_STANDARD, Engine};
-use color_eyre::eyre::bail;
 use getrandom::getrandom;
-use hmac::{Hmac, Mac};
 use http_body_util::Full;
 use hyper::{
     body::{Bytes, Incoming},
@@ -11,52 +9,12 @@ use hyper::{
 use s3::{error::S3Error, Bucket};
 use serde::{Deserialize, Serialize};
 use serde_json::from_slice;
-use sha2::{Digest, Sha256};
-use std::{collections::HashMap, ops::BitXor, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
+use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
+use argon2::password_hash::{Error, SaltString};
 use tokio::sync::RwLock;
 
 pub const AUTH_DATA_LOCATION: &str = "auth_data.json";
-const I: u32 = 4096;
-
-type HmacSha256 = Hmac<Sha256>;
-
-fn hmac(key: &[u8], content: &[u8]) -> color_eyre::Result<Vec<u8>> {
-    let mut hmac = HmacSha256::new_from_slice(key)?;
-    hmac.update(content);
-    Ok(hmac.finalize().into_bytes().to_vec())
-}
-
-fn h(content: &[u8]) -> Vec<u8> {
-    let mut sha = Sha256::default();
-    sha.update(content);
-    sha.finalize().to_vec()
-}
-
-#[allow(non_snake_case)]
-fn Hi(key: &str, salt: &[u8], i: u32) -> color_eyre::Result<Vec<u8>> {
-    if salt.is_empty() {
-        bail!("Salt cannot be empty");
-    }
-
-    let salt = salt.to_vec();
-    let mut prev = hmac(key.as_bytes(), &salt)?;
-    let mut all: Vec<Vec<u8>> = vec![prev.clone()];
-    for _ in 1..i {
-        let next = hmac(key.as_bytes(), &prev)?;
-        all.push(next.clone());
-        prev = next;
-    }
-
-    Ok(all
-        .into_iter()
-        .reduce(|acc, item| {
-            acc.into_iter()
-                .zip(item)
-                .map(|(a, b)| a.bitxor(b))
-                .collect()
-        })
-        .unwrap())
-}
 
 #[derive(Clone)]
 pub struct AuthChecker {
@@ -82,8 +40,7 @@ impl From<Result<Response<Full<Bytes>>, http::Error>> for AuthReturn {
 #[derive(Serialize, Deserialize, Clone)]
 struct UsernameAndPassword {
     username: String,
-    salt: [u8; 16],
-    stored_key: Vec<u8>,
+    stored_key: String,
 }
 
 impl AuthChecker {
@@ -135,12 +92,13 @@ impl AuthChecker {
         username: String,
         password: String,
     ) -> color_eyre::Result<()> {
-        let mut salt = [0; 16];
+        let mut salt = [0; 32];
         getrandom(&mut salt)?;
+        let saltstring = SaltString::encode_b64(&salt)?;
 
-        let salted_password = Hi(&password, &salt, I)?;
-        let client_key = hmac(&salted_password, b"Client Key")?;
-        let stored_key = h(&client_key);
+        let argon2 = Argon2::default();
+        let password_hash = argon2.hash_password(password.as_bytes(), &saltstring)?;
+        let stored_key = password_hash.serialize().to_string();
 
         let mut writeable = self.entries.write().await;
 
@@ -148,7 +106,6 @@ impl AuthChecker {
             pattern,
             UsernameAndPassword {
                 username,
-                salt,
                 stored_key,
             },
         );
@@ -160,7 +117,6 @@ impl AuthChecker {
         let readable = self.entries.read().await;
         let Some(UsernameAndPassword {
             username,
-            salt,
             stored_key,
         }) = readable
             .iter()
@@ -169,6 +125,15 @@ impl AuthChecker {
         else {
             return AuthReturn::AuthConfirmed(req);
         };
+
+        let password_hash = match PasswordHash::new(&stored_key) {
+            Ok(x) => x,
+            Err(e) => {
+                error!(?e, "Unable to decode stoed password key");
+                return empty_with_code(StatusCode::BAD_REQUEST).into();
+            }
+        };
+        let argon = Argon2::default();
 
         let headers = req.headers();
         let provided_auth_b64 = match headers.get("Authorization").cloned() {
@@ -216,32 +181,27 @@ impl AuthChecker {
             return empty_with_code(StatusCode::BAD_REQUEST).into();
         };
 
+        let password_matches = match argon.verify_password(provided_password.as_bytes(), &password_hash) {
+            Ok(()) => true,
+            Err(Error::Password) => {
+                false
+            },
+            Err(e) => {
+                warn!(?e, "Error verifiying password");
+                return empty_with_code(StatusCode::INTERNAL_SERVER_ERROR).into();
+            }
+        };
+
         if username != provided_username {
             warn!("Usernames didn't match for auth");
             return empty_with_code(StatusCode::UNAUTHORIZED).into();
         }
 
-        let salted_password = match Hi(provided_password, &salt, I) {
-            Ok(x) => x,
-            Err(e) => {
-                error!(?e, "Error hashing provided password");
-                return empty_with_code(StatusCode::INTERNAL_SERVER_ERROR).into();
-            }
-        };
-        let client_key = match hmac(&salted_password, b"Client Key") {
-            Ok(x) => x,
-            Err(e) => {
-                error!(?e, "Error hashing client key");
-                return empty_with_code(StatusCode::INTERNAL_SERVER_ERROR).into();
-            }
-        };
-        let provided_stored_key = h(&client_key);
-
-        if provided_stored_key != stored_key {
+        if password_matches {
+            AuthReturn::AuthConfirmed(req)
+        } else {
             warn!("Passwords didn't match for auth");
             empty_with_code(StatusCode::UNAUTHORIZED).into()
-        } else {
-            AuthReturn::AuthConfirmed(req)
         }
     }
 }
