@@ -1,11 +1,16 @@
-use crate::s3::get_bucket;
 use color_eyre::eyre::bail;
 use getrandom::getrandom;
-use hmac::Hmac;
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use serde_json::from_slice;
-use sha2::{digest::Mac, Sha256};
+use sha2::{Sha256, Digest};
 use std::{collections::HashMap, ops::BitXor};
+use std::sync::Arc;
+use http_body_util::Full;
+use hyper::body::{Bytes, Incoming};
+use hyper::{Request, Response};
+use s3::Bucket;
+use tokio::sync::RwLock;
 
 pub const AUTH_DATA_LOCATION: &str = "auth_data.json";
 
@@ -20,16 +25,17 @@ fn hmac(key: &[u8], content: &[u8]) -> color_eyre::Result<Vec<u8>> {
 fn h (content: &[u8]) -> Vec<u8> {
     let mut sha = Sha256::default();
     sha.update(content);
-    hmac.finalize().into_bytes().to_vec()
+    sha.finalize().to_vec()
 }
 
+#[allow(non_snake_case)]
 fn Hi(key: &str, salt: &mut [u8], i: u32) -> color_eyre::Result<Vec<u8>> {
     if salt.is_empty() {
         bail!("Salt cannot be empty");
     }
 
     salt[salt.len() - 1] = 1;
-    let mut prev = hmac(key.as_bytes(), &salt)?;
+    let mut prev = hmac(key.as_bytes(), salt)?;
     let mut all: Vec<Vec<u8>> = vec![prev.clone()];
     for _ in 1..i {
         let next = hmac(key.as_bytes(), &prev)?;
@@ -41,16 +47,17 @@ fn Hi(key: &str, salt: &mut [u8], i: u32) -> color_eyre::Result<Vec<u8>> {
         .into_iter()
         .reduce(|acc, item| {
             acc.into_iter()
-                .zip(item.into_iter())
+                .zip(item)
                 .map(|(a, b)| a.bitxor(b))
                 .collect()
         })
         .unwrap())
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct Auth {
-    entries: HashMap<String, UsernameAndPassword>,
+#[derive(Clone)]
+pub struct AuthChecker {
+    //deliberately not using dashmap as i want to be able to replace the entire map
+    entries: Arc<RwLock<HashMap<String, UsernameAndPassword>>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -60,17 +67,29 @@ struct UsernameAndPassword {
     stored_key: Vec<u8>,
 }
 
-impl Auth {
-    pub async fn new() -> color_eyre::Result<Self> {
-        let bucket = get_bucket();
+impl AuthChecker {
+    pub async fn new(bucket: &Bucket) -> color_eyre::Result<Self> {
         let file_contents = bucket.get_object(AUTH_DATA_LOCATION).await?.to_vec();
+        let entries = Arc::new(RwLock::new(from_slice(&file_contents)?));
 
-        Ok(from_slice(&file_contents)?)
+
+        Ok(Self {
+            entries
+        })
     }
 
-    pub async fn save(self) -> color_eyre::Result<()> {
-        let sered = serde_json::to_vec(&self)?;
-        let bucket = get_bucket();
+    pub async fn reload (&self, bucket: &Bucket) -> color_eyre::Result<()> {
+        let file_contents = bucket.get_object(AUTH_DATA_LOCATION).await?.to_vec();
+        let entries = from_slice(&file_contents)?;
+
+        *self.entries.write().await = entries;
+
+        Ok(())
+    }
+
+    pub async fn save(self, bucket: &Bucket) -> color_eyre::Result<()> {
+        let read_copy = self.entries.read().await;
+        let sered = serde_json::to_vec(&*read_copy)?;
         bucket
             .put_object_with_content_type(AUTH_DATA_LOCATION, &sered, mime::JSON.as_str())
             .await?;
@@ -78,7 +97,7 @@ impl Auth {
         Ok(())
     }
 
-    pub fn protect(
+    pub async fn protect(
         &mut self,
         pattern: String,
         username: String,
@@ -92,7 +111,9 @@ impl Auth {
         let client_key = hmac(&salted_password, b"Client Key")?;
         let stored_key = h(&client_key);
 
-        self.entries.insert(
+        let mut writeable = self.entries.write().await;
+
+        writeable.insert(
             pattern,
             UsernameAndPassword {
                 username,
@@ -102,5 +123,16 @@ impl Auth {
         );
 
         Ok(())
+    }
+
+    pub async fn check_auth (&self, path: &str, req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Request<Incoming>> {
+        let readable = self.entries.read().await;
+        let Some((_, UsernameAndPassword {
+            username, salt, stored_key
+        })) = readable.iter().find(|(pattern, _)| path.contains(pattern.as_str())).cloned() else {
+            return Err(req);
+        };
+
+        todo!()
     }
 }

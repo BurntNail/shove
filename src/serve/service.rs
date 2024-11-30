@@ -9,7 +9,7 @@ use hyper::{
 use soketto::handshake::http::{is_upgrade_request, Server};
 use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ServeService {
     state: State,
 }
@@ -136,6 +136,11 @@ async fn serve_get_head(
         }
         path.push_str("index.html");
     }
+
+    let req = match state.check_auth(&path, req).await {
+        Ok(rsp) => return Ok(rsp),
+        Err(req) => req
+    };
 
     trace!(?path, "Serving");
 

@@ -10,7 +10,7 @@ use std::{
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-mod protect;
+pub mod protect;
 pub mod s3;
 mod serve;
 mod upload;

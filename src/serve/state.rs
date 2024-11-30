@@ -5,19 +5,23 @@ use crate::{
 };
 use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
-use hyper::StatusCode;
+use hyper::{Request, Response, StatusCode};
 use moka::future::{Cache, CacheBuilder};
 use s3::Bucket;
 use std::{collections::HashSet, env, sync::Arc};
+use http_body_util::Full;
+use hyper::body::{Bytes, Incoming};
 use tokio::sync::RwLock;
+use crate::protect::auth::AuthChecker;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct State {
     bucket: Box<Bucket>,
     upload_data: Arc<RwLock<UploadData>>,
     cache: Cache<String, (Vec<u8>, String)>,
     pub tigris_token: Option<Arc<str>>,
     live_reloader: LiveReloader,
+    auth: AuthChecker,
 }
 
 impl State {
@@ -91,6 +95,7 @@ impl State {
         });
 
         let live_reloader = LiveReloader::new();
+        let auth = AuthChecker::new(&bucket).await?;
 
         Ok(Some(Self {
             bucket,
@@ -98,6 +103,7 @@ impl State {
             cache,
             tigris_token,
             live_reloader,
+            auth
         }))
     }
 
@@ -108,6 +114,10 @@ impl State {
     #[instrument(skip(self))]
     pub async fn reload(&self) -> color_eyre::Result<()> {
         trace!("Checking for reload");
+
+        if let Err(e) = self.auth.reload(&self.bucket).await {
+            error!(?e, "Error reloading auth checker");
+        }
 
         let old_upload_data = self.upload_data.read().await.clone();
         let Some(new_upload_data) = get_upload_data(&self.bucket).await? else {
@@ -209,5 +219,9 @@ impl State {
             },
             None => not_found().await,
         }
+    }
+
+    pub async fn check_auth (&self, path: &str, req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Request<Incoming>> {
+        self.auth.check_auth(path, req).await
     }
 }
