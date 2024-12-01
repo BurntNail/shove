@@ -6,9 +6,8 @@ use futures::{
 };
 use hyper::{body::Incoming, upgrade::Upgraded, Request};
 use hyper_util::rt::TokioIo;
-use soketto::{handshake::http::Server, Sender};
+use soketto::{connection::Error as SokettoError, handshake::http::Server, Sender};
 use std::sync::Arc;
-use soketto::connection::Error as SokettoError;
 use tokio::sync::Mutex;
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt};
 
@@ -44,10 +43,10 @@ impl LiveReloader {
 
     pub async fn send_reload(&self) -> color_eyre::Result<()> {
         async fn reload(mut sender: WSSender) -> color_eyre::Result<()> {
-            fn handle (res: Result<(), SokettoError>) -> color_eyre::Result<()> {
+            fn handle(res: Result<(), SokettoError>) -> color_eyre::Result<()> {
                 match res {
                     Ok(()) | Err(SokettoError::Closed) => Ok(()),
-                    Err(e) => Err(e.into())
+                    Err(e) => Err(e.into()),
                 }
             }
 
@@ -78,7 +77,7 @@ impl LiveReloader {
         async fn stop(mut sender: WSSender) -> color_eyre::Result<()> {
             match sender.close().await {
                 Ok(()) | Err(SokettoError::Closed) => Ok(()),
-                Err(e) => Err(e.into())
+                Err(e) => Err(e.into()),
             }
         }
 

@@ -1,10 +1,9 @@
-use std::env::current_dir;
-use std::path::PathBuf;
 use crate::{
     s3::{get_bucket, get_upload_data},
     upload::machinery::upload_dir_to_bucket,
 };
 use color_eyre::owo_colors::OwoColorize;
+use std::{env::current_dir, path::PathBuf};
 
 mod machinery;
 

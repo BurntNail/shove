@@ -1,12 +1,9 @@
 use crate::{protect::protect, serve::serve, upload::upload};
+use color_eyre::owo_colors::OwoColorize;
 use dotenvy::var;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    env::{args},
-};
+use std::{collections::HashMap, env::args};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-use color_eyre::owo_colors::OwoColorize;
 
 pub mod protect;
 pub mod s3;

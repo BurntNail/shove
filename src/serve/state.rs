@@ -1,18 +1,17 @@
 use crate::{
-    protect::auth::{AuthChecker, AuthReturn},
+    protect::auth::{AuthChecker, AuthReturn, AUTH_DATA_LOCATION},
     s3::{get_bucket, get_upload_data},
     serve::livereload::LiveReloader,
     UploadData,
 };
+use blake2::{Blake2b512, Digest};
 use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
 use hyper::{body::Incoming, Request, StatusCode};
 use moka::future::{Cache, CacheBuilder};
 use s3::Bucket;
 use std::{collections::HashSet, env, sync::Arc};
-use blake2::{Blake2b512, Digest};
 use tokio::sync::RwLock;
-use crate::protect::auth::AUTH_DATA_LOCATION;
 
 #[derive(Clone)]
 pub struct State {
@@ -56,7 +55,7 @@ impl State {
         let raw_auth_hash = {
             let raw = match Self::read_file_from_s3(AUTH_DATA_LOCATION.to_string(), &bucket).await {
                 Ok((x, _, _)) => x,
-                Err(_e) => vec![]
+                Err(_e) => vec![],
             };
 
             let mut hasher = Blake2b512::new();
@@ -116,7 +115,7 @@ impl State {
             tigris_token,
             live_reloader,
             auth,
-            last_auth_hash
+            last_auth_hash,
         }))
     }
 
@@ -129,10 +128,11 @@ impl State {
         trace!("Checking for reload");
 
         let raw_auth_hash = {
-            let raw = match Self::read_file_from_s3(AUTH_DATA_LOCATION.to_string(), &self.bucket).await {
-                Ok((x, _, _)) => x,
-                Err(_e) => vec![]
-            };
+            let raw =
+                match Self::read_file_from_s3(AUTH_DATA_LOCATION.to_string(), &self.bucket).await {
+                    Ok((x, _, _)) => x,
+                    Err(_e) => vec![],
+                };
 
             let mut hasher = Blake2b512::new();
             hasher.update(&raw);
