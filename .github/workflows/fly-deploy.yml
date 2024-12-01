@@ -38,7 +38,7 @@ jobs:
 
   docker:
     name: Build & Upload to Docker
-    needs: commit-hash
+    needs: [commit-hash, deploy]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
