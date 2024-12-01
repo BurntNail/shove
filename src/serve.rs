@@ -99,7 +99,6 @@ pub async fn serve() -> color_eyre::Result<()> {
     let http = http1::Builder::new();
     let mut signal = std::pin::pin!(shutdown_signal(reload));
 
-    let svc = ServeService::new(state);
 
     let listener = TcpListener::bind(&addr).await?;
     info!(?addr, "Serving");
@@ -108,9 +107,9 @@ pub async fn serve() -> color_eyre::Result<()> {
 
     loop {
         tokio::select! {
-            Ok((stream, _addr)) = listener.accept() => {
+            Ok((stream, remote_addr)) = listener.accept() => {
                 let io = TokioIo::new(stream);
-                let svc = svc.clone();
+                let svc = ServeService::new(state.clone(), remote_addr);
 
                 let conn = http.serve_connection(io, svc).with_upgrades();
 

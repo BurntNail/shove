@@ -12,15 +12,16 @@ use hyper::{
 use path_clean::PathClean;
 use soketto::handshake::http::{is_upgrade_request, Server};
 use std::{future::Future, path::Path, pin::Pin, sync::Arc};
+use std::net::SocketAddr;
 
-#[derive(Clone)]
 pub struct ServeService {
     state: State,
+    remote_ip: SocketAddr
 }
 
 impl ServeService {
-    pub fn new(state: State) -> Self {
-        Self { state }
+    pub fn new(state: State, remote_ip: SocketAddr) -> Self {
+        Self { state, remote_ip }
     }
 }
 
@@ -31,6 +32,7 @@ impl Service<Request<Incoming>> for ServeService {
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
         let state = self.state.clone();
+        let remote_addr = self.remote_ip.clone();
         let livereload = state.live_reloader();
 
         Box::pin(async move {
@@ -57,7 +59,7 @@ impl Service<Request<Incoming>> for ServeService {
             } else {
                 match *req.method() {
                     Method::POST => serve_post(req, state).await,
-                    Method::GET | Method::HEAD => serve_get_head(req, state).await,
+                    Method::GET | Method::HEAD => serve_get_head(req, state, remote_addr).await,
                     _ => empty_with_code(StatusCode::METHOD_NOT_ALLOWED),
                 }
             }
@@ -119,6 +121,7 @@ async fn serve_post(
 async fn serve_get_head(
     req: Request<Incoming>,
     state: State,
+    remote_addr: SocketAddr
 ) -> Result<Response<Full<Bytes>>, http::Error> {
     let path = req.uri().path();
     if path == "/healthcheck" {
@@ -145,7 +148,7 @@ async fn serve_get_head(
         path.push_str("index.html");
     }
 
-    let req = match state.check_auth(&path, req).await {
+    let req = match state.check_auth(&path, req, remote_addr).await {
         AuthReturn::AuthConfirmed(req) => req,
         AuthReturn::ResponseFromAuth(rsp) => return Ok(rsp),
         AuthReturn::Error(e) => return Err(e),

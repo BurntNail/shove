@@ -10,6 +10,7 @@ use hyper::{body::Incoming, Request, StatusCode};
 use moka::future::{Cache, CacheBuilder};
 use s3::Bucket;
 use std::{collections::HashSet, env, sync::Arc};
+use std::net::SocketAddr;
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
 
@@ -248,7 +249,7 @@ impl State {
         }
     }
 
-    pub async fn check_auth(&self, path: &str, req: Request<Incoming>) -> AuthReturn {
-        self.auth.check_auth(path, req).await
+    pub async fn check_auth(&self, path: &str, req: Request<Incoming>, remote_addr: SocketAddr) -> AuthReturn {
+        self.auth.check_auth(path, req, remote_addr).await
     }
 }
