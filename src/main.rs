@@ -1,16 +1,13 @@
-use crate::{serve::serve, upload::upload};
+use crate::{protect::protect, serve::serve, upload::upload};
 use color_eyre::owo_colors::OwoColorize;
 use dotenvy::var;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    env::{args, current_dir},
-    path::PathBuf,
-};
+use std::{collections::HashMap, env::args};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-mod s3;
-mod serve;
+pub mod protect;
+pub mod s3;
+pub mod serve;
 mod upload;
 
 #[macro_use]
@@ -64,58 +61,28 @@ pub fn setup() {
 pub enum Args {
     Serve,
     Upload(String),
+    Protect,
 }
 
 impl Args {
     pub fn parse() -> Self {
-        let mut env_vars = args().skip(1);
+        let mut args = args().skip(1);
 
-        if let Some(command) = env_vars.next() {
+        if let Some(command) = args.next() {
             match command.as_str() {
                 "serve" => {
                     return Self::Serve;
                 }
                 "upload" => {
-                    if let Some(dir) = env_vars.next() {
-                        let mut failed = false;
-
-                        let Ok(dir_path_buffer) = PathBuf::from(&dir).canonicalize() else {
-                            eprintln!("unable to canonicalise {}", "[DIR]".blue());
-                            std::process::exit(1);
-                        };
-                        if !dir_path_buffer.exists() {
-                            eprintln!("unable to find provided {}", "[DIR]".blue());
-                            failed = true;
-                        }
-                        if !dir_path_buffer.is_dir() {
-                            eprintln!("provided {} must be a directory", "[DIR]".blue());
-                            failed = true;
-                        }
-                        match current_dir() {
-                            Ok(cd) => {
-                                if dir_path_buffer.eq(&cd) {
-                                    eprintln!(
-                                        "provided {} must be a different from current directory",
-                                        "[DIR]".blue()
-                                    );
-                                    failed = true;
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("unable to access current directory: {e:?}");
-                                failed = true;
-                            }
-                        }
-
-                        if !failed {
-                            return Self::Upload(dir);
-                        } else {
-                            std::process::exit(1);
-                        }
+                    if let Some(dir) = args.next() {
+                        return Self::Upload(dir);
                     } else {
                         eprintln!("missing argument {}", "[DIR]".blue());
                         std::process::exit(1);
                     }
+                }
+                "protect" => {
+                    return Self::Protect;
                 }
                 _ => {}
             }
@@ -135,6 +102,7 @@ impl Args {
         eprintln!("{}", "Available Commands:".underline());
         eprintln!("- {}", "serve".italic());
         eprintln!("- {} {}", "upload".italic(), "[DIR]".blue());
+        eprintln!("- {}", "protect".italic());
         eprintln!();
         eprintln!("`{}` command", "serve".italic());
         eprintln!(
@@ -156,6 +124,12 @@ impl Args {
         );
         eprintln!("  eg. `{}`", "shove upload public".cyan());
         eprintln!();
+        eprintln!("`{}` command", "protect".italic());
+        eprintln!(
+            "  Asks the user for a directory to protect, and the username/password combo to protect it",
+        );
+        eprintln!("  eg. `{}`", "shove protect".cyan());
+        eprintln!();
         eprintln!("{}", "Environment Variables".underline());
         eprintln!(
             "{} - the secret key ID for the S3 bucket",
@@ -171,14 +145,18 @@ impl Args {
             "AWS_ENDPOINT_URL_S3".green()
         );
         eprintln!(
-            "{} - the port used for serving the bucket. Not needed if uploading",
+            "{} - the port used for serving the bucket. Not needed if uploading/protecting",
             "PORT".green()
         );
         eprintln!(
-            "{} - the sentry DSN for use with analytics. Not needed if uploading. Optional",
+            "{} - the sentry DSN for use with analytics. Not needed if uploading/protecting. Optional",
             "SENTRY_DSN".green()
         );
-        eprintln!("{} - the authentication token for use with Tigris Webhooks. Not needed if uploading. Optional", "TIGRIS_TOKEN".green());
+        eprintln!(
+            "{} - the key used to encrypt the authentication data. Not needed if uploading.",
+            "AUTH_ENCRYPTION_KEY".green(),
+        );
+        eprintln!("{} - the authentication token for use with Tigris Webhooks. Not needed if uploading/protecting. Optional", "TIGRIS_TOKEN".green());
 
         std::process::exit(1);
     }
@@ -226,5 +204,12 @@ fn main() {
                 error!(?e, "Error uploading");
             }
         }),
+        Args::Protect => {
+            runtime.block_on(async move {
+                if let Err(e) = protect().await {
+                    error!(?e, "Error protecting");
+                }
+            });
+        }
     }
 }

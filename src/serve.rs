@@ -3,7 +3,8 @@ mod service;
 mod state;
 
 use crate::serve::{livereload::LiveReloader, service::ServeService, state::State};
-use hyper::server::conn::http1;
+use http_body_util::Full;
+use hyper::{body::Bytes, http, server::conn::http1, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use std::{env::var, net::SocketAddr, time::Duration};
 use tokio::{
@@ -16,6 +17,10 @@ use tokio::{
 enum Reloader {
     Interval(JoinHandle<()>, MPSCSender<()>),
     Waiting(LiveReloader),
+}
+
+pub fn empty_with_code(code: StatusCode) -> Result<Response<Full<Bytes>>, http::Error> {
+    Response::builder().status(code).body(Full::default())
 }
 
 //from https://github.com/tokio-rs/axum/blob/main/examples/graceful-shutdown/src/main.rs
@@ -78,7 +83,7 @@ pub async fn serve() -> color_eyre::Result<()> {
                         },
                         () = tokio::time::sleep(Duration::from_secs(60)) => {
                             info!("Reloading from timer");
-                            if let Err(e) = reload_state.reload().await {
+                            if let Err(e) = reload_state.check_and_reload().await {
                                 error!(?e, "Error reloading state");
                             }
                         }

@@ -1,4 +1,7 @@
-use crate::serve::state::State;
+use crate::{
+    protect::auth::AuthReturn,
+    serve::{empty_with_code, state::State},
+};
 use http_body_util::Full;
 use hyper::{
     body::{Bytes, Incoming},
@@ -6,10 +9,11 @@ use hyper::{
     service::Service,
     Method, Request, Response, StatusCode,
 };
+use path_clean::PathClean;
 use soketto::handshake::http::{is_upgrade_request, Server};
-use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc};
+use std::{future::Future, path::Path, pin::Pin, sync::Arc};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ServeService {
     state: State,
 }
@@ -61,10 +65,6 @@ impl Service<Request<Incoming>> for ServeService {
     }
 }
 
-fn empty_with_code(code: StatusCode) -> Result<Response<Full<Bytes>>, http::Error> {
-    Response::builder().status(code).body(Full::default())
-}
-
 #[instrument(skip(state, req))]
 async fn serve_post(
     req: Request<Incoming>,
@@ -104,7 +104,7 @@ async fn serve_post(
             }
 
             info!("Reloading from webhook");
-            if let Err(e) = state.reload().await {
+            if let Err(e) = state.check_and_reload().await {
                 error!(?e, "Error reloading state");
                 empty_with_code(StatusCode::INTERNAL_SERVER_ERROR)
             } else {
@@ -125,17 +125,31 @@ async fn serve_get_head(
         return empty_with_code(StatusCode::OK);
     }
 
-    let mut path = path.to_string();
+    let cleaned = Path::new(path).clean();
+    let mut path = match cleaned.to_str() {
+        Some(st) => st.to_owned(),
+        None => {
+            warn!(?cleaned, "Couldn't convert path to string");
+            return empty_with_code(StatusCode::BAD_REQUEST);
+        }
+    };
 
-    if PathBuf::from(&path)
-        .extension()
-        .is_none_or(|x| x.is_empty())
-    {
-        if path.as_bytes()[path.as_bytes().len() - 1] != b'/' {
+    if cleaned.extension().is_none_or(|x| x.is_empty()) {
+        //ensure that we don't miss zero-index fun
+        #[allow(clippy::if_same_then_else)]
+        if path.is_empty() {
+            path.push('/');
+        } else if path.as_bytes()[path.as_bytes().len() - 1] != b'/' {
             path.push('/');
         }
         path.push_str("index.html");
     }
+
+    let req = match state.check_auth(&path, req).await {
+        AuthReturn::AuthConfirmed(req) => req,
+        AuthReturn::ResponseFromAuth(rsp) => return Ok(rsp),
+        AuthReturn::Error(e) => return Err(e),
+    };
 
     trace!(?path, "Serving");
 
