@@ -77,7 +77,7 @@ impl AuthChecker {
         ));
 
         let rate_limiter = Arc::new(RateLimiter::keyed(Quota::per_minute(
-            NonZeroU32::new(100).unwrap(),
+            NonZeroU32::new(10).unwrap(),
         )));
 
         Ok(Self {

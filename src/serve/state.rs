@@ -64,7 +64,7 @@ impl State {
         };
         let last_auth_hash = Arc::new(RwLock::new(raw_auth_hash));
 
-        let cache = CacheBuilder::new(1024)
+        let cache = CacheBuilder::new(256)
             .support_invalidation_closures()
             .build();
 
