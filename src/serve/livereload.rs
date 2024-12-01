@@ -8,6 +8,7 @@ use hyper::{body::Incoming, upgrade::Upgraded, Request};
 use hyper_util::rt::TokioIo;
 use soketto::{handshake::http::Server, Sender};
 use std::sync::Arc;
+use soketto::connection::Error as SokettoError;
 use tokio::sync::Mutex;
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt};
 
@@ -43,9 +44,17 @@ impl LiveReloader {
 
     pub async fn send_reload(&self) -> color_eyre::Result<()> {
         async fn reload(mut sender: WSSender) -> color_eyre::Result<()> {
-            sender.send_text("reload").await?;
-            sender.flush().await?;
-            sender.close().await?;
+            fn handle (res: Result<(), SokettoError>) -> color_eyre::Result<()> {
+                match res {
+                    Ok(()) | Err(SokettoError::Closed) => Ok(()),
+                    Err(e) => Err(e.into())
+                }
+            }
+
+            handle(sender.send_text("reload").await)?;
+            handle(sender.flush().await)?;
+            handle(sender.close().await)?;
+
             Ok(())
         }
 
@@ -67,8 +76,10 @@ impl LiveReloader {
 
     pub async fn send_stop(&self) -> color_eyre::Result<()> {
         async fn stop(mut sender: WSSender) -> color_eyre::Result<()> {
-            sender.close().await?;
-            Ok(())
+            match sender.close().await {
+                Ok(()) | Err(SokettoError::Closed) => Ok(()),
+                Err(e) => Err(e.into())
+            }
         }
 
         let senders = std::mem::take::<Vec<_>>(self.senders.lock().await.as_mut());
