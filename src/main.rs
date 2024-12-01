@@ -79,41 +79,7 @@ impl Args {
                 }
                 "upload" => {
                     if let Some(dir) = args.next() {
-                        let mut failed = false;
-
-                        let Ok(dir_path_buffer) = PathBuf::from(&dir).canonicalize() else {
-                            eprintln!("unable to canonicalise {}", "[DIR]".blue());
-                            std::process::exit(1);
-                        };
-                        if !dir_path_buffer.exists() {
-                            eprintln!("unable to find provided {}", "[DIR]".blue());
-                            failed = true;
-                        }
-                        if !dir_path_buffer.is_dir() {
-                            eprintln!("provided {} must be a directory", "[DIR]".blue());
-                            failed = true;
-                        }
-                        match current_dir() {
-                            Ok(cd) => {
-                                if dir_path_buffer.eq(&cd) {
-                                    eprintln!(
-                                        "provided {} must be a different from current directory",
-                                        "[DIR]".blue()
-                                    );
-                                    failed = true;
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("unable to access current directory: {e:?}");
-                                failed = true;
-                            }
-                        }
-
-                        if !failed {
-                            return Self::Upload(dir);
-                        } else {
-                            std::process::exit(1);
-                        }
+                        return Self::Upload(dir);
                     } else {
                         eprintln!("missing argument {}", "[DIR]".blue());
                         std::process::exit(1);
