@@ -4,13 +4,13 @@ use crate::{
     serve::livereload::LiveReloader,
     UploadData,
 };
-use blake2::{Blake2b512, Digest};
 use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
 use hyper::{body::Incoming, Request, StatusCode};
 use moka::future::{Cache, CacheBuilder};
 use s3::Bucket;
 use std::{collections::HashSet, env, sync::Arc};
+use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
 
 #[derive(Clone)]
@@ -58,7 +58,7 @@ impl State {
                 Err(_e) => vec![],
             };
 
-            let mut hasher = Blake2b512::new();
+            let mut hasher = Sha256::new();
             hasher.update(&raw);
             hasher.finalize().to_vec()
         };
@@ -134,7 +134,7 @@ impl State {
                     Err(_e) => vec![],
                 };
 
-            let mut hasher = Blake2b512::new();
+            let mut hasher = Sha256::new();
             hasher.update(&raw);
             hasher.finalize().to_vec()
         };

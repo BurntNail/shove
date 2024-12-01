@@ -1,5 +1,4 @@
 use crate::{s3::UPLOAD_DATA_LOCATION, UploadData};
-use blake2::{Blake2b512, Digest};
 use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
 use new_mime_guess::MimeGuess;
@@ -9,6 +8,7 @@ use std::{
     fmt::Write,
     path::PathBuf,
 };
+use sha2::{Digest, Sha256};
 use tokio::{fs::File, io::AsyncReadExt};
 use walkdir::WalkDir;
 
@@ -49,7 +49,7 @@ pub async fn upload_dir_to_bucket(
 
         let mime_guess = new_mime_guess::from_path(&pb);
 
-        let mut hasher = Blake2b512::new();
+        let mut hasher = Sha256::new();
         hasher.update(&contents);
         let hash = hasher.finalize().to_vec();
         let hash = hash.into_iter().fold(String::new(), |mut acc, x| {

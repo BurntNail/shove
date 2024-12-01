@@ -18,6 +18,8 @@ use s3::{error::S3Error, Bucket};
 use serde::{Deserialize, Serialize};
 use serde_json::from_slice;
 use std::{collections::HashMap, env::var, sync::Arc};
+use hkdf::Hkdf;
+use sha2::Sha256;
 use tokio::sync::RwLock;
 
 pub const AUTH_DATA_LOCATION: &str = "authdata";
@@ -55,12 +57,10 @@ impl AuthChecker {
         let password =
             var("AUTH_ENCRYPTION_KEY").expect("unable to find env var AUTH_ENCRYPTION_KEY");
         let salt = &bucket.name;
+
+        let hk = Hkdf::<Sha256>::new(Some(salt.as_bytes()), password.as_bytes());
         let mut key_output = [0; 32];
-        Argon2::default().hash_password_into(
-            password.as_bytes(),
-            salt.as_bytes(),
-            &mut key_output,
-        )?;
+        hk.expand(b"Auth Encryption Key", &mut key_output)?;
 
         let encryption_key = Key::<Aes256Gcm>::from_slice(&key_output).to_owned();
 
@@ -227,10 +227,13 @@ impl AuthChecker {
             }
         };
 
-        let Some((provided_username, provided_password)) = decoded.split_once(":") else {
+        //technically, usernames can have colons so we do this
+        let Some(colon_index) = decoded.rfind(':') else {
             debug!("Unable to turn Basic auth into username & password");
             return empty_with_code(StatusCode::BAD_REQUEST).into();
         };
+        let (provided_username, provided_password) = decoded.split_at(colon_index);
+        let provided_password = &provided_password[1..];
 
         let password_matches =
             match argon.verify_password(provided_password.as_bytes(), &password_hash) {

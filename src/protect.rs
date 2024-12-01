@@ -34,6 +34,7 @@ pub async fn protect() -> color_eyre::Result<()> {
             let mut patterns_and_usernames = existing_auth.get_patterns_and_usernames().await;
             if patterns_and_usernames.is_empty() {
                 println!("No protections in place.");
+                return Ok(());
             }
 
             let items: Vec<String> = patterns_and_usernames

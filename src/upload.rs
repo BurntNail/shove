@@ -4,6 +4,7 @@ use crate::{
 };
 use color_eyre::owo_colors::OwoColorize;
 use std::{env::current_dir, path::PathBuf};
+use color_eyre::eyre::bail;
 
 mod machinery;
 
@@ -11,8 +12,7 @@ pub async fn upload(dir: &str) -> color_eyre::Result<()> {
     let mut failed = false;
 
     let Ok(dir_path_buffer) = PathBuf::from(&dir).canonicalize() else {
-        eprintln!("unable to canonicalise {}", "[DIR]".blue());
-        std::process::exit(1);
+        bail!("unable to canonicalise {}", "[DIR]".blue());
     };
     if !dir_path_buffer.exists() {
         eprintln!("unable to find provided {}", "[DIR]".blue());
