@@ -48,6 +48,9 @@ impl State {
         };
         info!("Got bucket & upload data");
 
+        let live_reloader = LiveReloader::new();
+        let auth = AuthChecker::new(&bucket).await?;
+
         let cache = CacheBuilder::new(1024)
             .support_invalidation_closures()
             .build();
@@ -91,9 +94,6 @@ impl State {
 
             info!("Read files from S3");
         });
-
-        let live_reloader = LiveReloader::new();
-        let auth = AuthChecker::new(&bucket).await?;
 
         Ok(Some(Self {
             bucket,

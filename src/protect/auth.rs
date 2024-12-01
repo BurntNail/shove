@@ -14,14 +14,18 @@ use s3::{error::S3Error, Bucket};
 use serde::{Deserialize, Serialize};
 use serde_json::from_slice;
 use std::{collections::HashMap, sync::Arc};
+use std::env::var;
+use aes_gcm::{Aes256Gcm, Key, KeyInit};
+use aes_gcm::aead::{Aead, Nonce};
 use tokio::sync::RwLock;
 
-pub const AUTH_DATA_LOCATION: &str = "auth_data.json";
+pub const AUTH_DATA_LOCATION: &str = "authdata";
 
 #[derive(Clone)]
 pub struct AuthChecker {
     //deliberately not using dashmap as I want to be able to replace the entire map
     entries: Arc<RwLock<HashMap<String, UsernameAndPassword>>>,
+    encryption_key: Key<Aes256Gcm>,
 }
 
 pub enum AuthReturn {
@@ -47,15 +51,50 @@ struct UsernameAndPassword {
 
 impl AuthChecker {
     pub async fn new(bucket: &Bucket) -> color_eyre::Result<Self> {
-        let entries = match bucket.get_object(AUTH_DATA_LOCATION).await {
-            Ok(x) => from_slice(&x.to_vec()).ok(),
-            Err(S3Error::HttpFailWithBody(404, _)) => None,
+        let password = var("AUTH_ENCRYPTION_KEY").expect("unable to find env var AUTH_ENCRYPTION_KEY");
+        let salt = &bucket.name;
+        let mut key_output = [0; 32];
+        Argon2::default().hash_password_into(password.as_bytes(), salt.as_bytes(), &mut key_output)?;
+
+        let encryption_key = Key::<Aes256Gcm>::from_slice(&key_output).to_owned();
+
+        let entries = Arc::new(RwLock::new(Self::read_from_s3(bucket, &encryption_key).await?));
+
+        Ok(Self { entries, encryption_key })
+    }
+
+    async fn read_from_s3 (bucket: &Bucket, key: &Key<Aes256Gcm>) -> color_eyre::Result<HashMap<String, UsernameAndPassword>> {
+        let contents = match bucket.get_object(AUTH_DATA_LOCATION).await {
+            Ok(x) => x.to_vec(),
+            Err(S3Error::HttpFailWithBody(404, _)) => return Ok(HashMap::new()),
             Err(e) => return Err(e.into()),
         };
 
-        let entries = Arc::new(RwLock::new(entries.unwrap_or_default()));
+        let (nonce, ciphered_data) = contents.split_at(12);
+        let nonce = Nonce::<Aes256Gcm>::from_slice(&nonce);
+        let cipher = Aes256Gcm::new(key);
 
-        Ok(Self { entries })
+        let json = cipher.decrypt(nonce, ciphered_data)?;
+        Ok(from_slice(&json)?)
+    }
+
+    pub async fn save_to_s3(self, bucket: &Bucket) -> color_eyre::Result<()> {
+        let mut nonce_data = [0; 12];
+        getrandom(&mut nonce_data)?;
+        let nonce = Nonce::<Aes256Gcm>::from_slice(&nonce_data);
+
+        let readable = self.entries.read().await;
+        let sered = serde_json::to_vec(&*readable)?;
+
+        let cipher = Aes256Gcm::new(&self.encryption_key);
+        let ciphered_data = cipher.encrypt(&nonce, sered.as_slice())?;
+
+        let mut encrypted_data = nonce_data.to_vec();
+        encrypted_data.extend(ciphered_data);
+
+        bucket.put_object_with_content_type(AUTH_DATA_LOCATION, &encrypted_data, "application/octet-stream").await?;
+
+        Ok(())
     }
 
     pub async fn rm_pattern(&self, pattern: &str) {
@@ -73,21 +112,8 @@ impl AuthChecker {
     }
 
     pub async fn reload(&self, bucket: &Bucket) -> color_eyre::Result<()> {
-        let file_contents = bucket.get_object(AUTH_DATA_LOCATION).await?.to_vec();
-        let entries = from_slice(&file_contents)?;
-
+        let entries = Self::read_from_s3(bucket, &self.encryption_key).await?;
         *self.entries.write().await = entries;
-
-        Ok(())
-    }
-
-    pub async fn save(self, bucket: &Bucket) -> color_eyre::Result<()> {
-        let read_copy = self.entries.read().await;
-        let sered = serde_json::to_vec(&*read_copy)?;
-        bucket
-            .put_object_with_content_type(AUTH_DATA_LOCATION, &sered, mime::JSON.as_str())
-            .await?;
-
         Ok(())
     }
 

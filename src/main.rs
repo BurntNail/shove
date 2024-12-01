@@ -1,13 +1,12 @@
 use crate::{protect::protect, serve::serve, upload::upload};
-use color_eyre::owo_colors::OwoColorize;
 use dotenvy::var;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    env::{args, current_dir},
-    path::PathBuf,
+    env::{args},
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use color_eyre::owo_colors::OwoColorize;
 
 pub mod protect;
 pub mod s3;
@@ -149,14 +148,18 @@ impl Args {
             "AWS_ENDPOINT_URL_S3".green()
         );
         eprintln!(
-            "{} - the port used for serving the bucket. Not needed if uploading",
+            "{} - the port used for serving the bucket. Not needed if uploading/protecting",
             "PORT".green()
         );
         eprintln!(
-            "{} - the sentry DSN for use with analytics. Not needed if uploading. Optional",
+            "{} - the sentry DSN for use with analytics. Not needed if uploading/protecting. Optional",
             "SENTRY_DSN".green()
         );
-        eprintln!("{} - the authentication token for use with Tigris Webhooks. Not needed if uploading. Optional", "TIGRIS_TOKEN".green());
+        eprintln!(
+            "{} - the key used to encrypt the authentication data. Not needed if uploading.",
+            "AUTH_ENCRYPTION_KEY".green(),
+        );
+        eprintln!("{} - the authentication token for use with Tigris Webhooks. Not needed if uploading/protecting. Optional", "TIGRIS_TOKEN".green());
 
         std::process::exit(1);
     }

@@ -53,7 +53,7 @@ pub async fn protect() -> color_eyre::Result<()> {
                 .interact()?
             {
                 existing_auth.rm_pattern(&pattern_to_remove).await;
-                existing_auth.save(&bucket).await?;
+                existing_auth.save_to_s3(&bucket).await?;
             }
         }
         2 => {
@@ -69,7 +69,7 @@ pub async fn protect() -> color_eyre::Result<()> {
                 .interact()?;
 
             existing_auth.protect(pattern, username, password).await?;
-            existing_auth.save(&bucket).await?;
+            existing_auth.save_to_s3(&bucket).await?;
         }
         _ => unreachable!(),
     }
