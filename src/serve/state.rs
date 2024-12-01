@@ -9,9 +9,8 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use hyper::{body::Incoming, Request, StatusCode};
 use moka::future::{Cache, CacheBuilder};
 use s3::Bucket;
-use std::{collections::HashSet, env, sync::Arc};
-use std::net::SocketAddr;
 use sha2::{Digest, Sha256};
+use std::{collections::HashSet, env, net::SocketAddr, sync::Arc};
 use tokio::sync::RwLock;
 
 #[derive(Clone)]
@@ -249,7 +248,12 @@ impl State {
         }
     }
 
-    pub async fn check_auth(&self, path: &str, req: Request<Incoming>, remote_addr: SocketAddr) -> AuthReturn {
+    pub async fn check_auth(
+        &self,
+        path: &str,
+        req: Request<Incoming>,
+        remote_addr: SocketAddr,
+    ) -> AuthReturn {
         self.auth.check_auth(path, req, remote_addr).await
     }
 }

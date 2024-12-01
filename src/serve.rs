@@ -99,7 +99,6 @@ pub async fn serve() -> color_eyre::Result<()> {
     let http = http1::Builder::new();
     let mut signal = std::pin::pin!(shutdown_signal(reload));
 
-
     let listener = TcpListener::bind(&addr).await?;
     info!(?addr, "Serving");
 

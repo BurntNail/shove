@@ -9,6 +9,8 @@ use argon2::{
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
 use getrandom::getrandom;
+use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
+use hkdf::Hkdf;
 use http_body_util::Full;
 use hyper::{
     body::{Bytes, Incoming},
@@ -17,12 +19,14 @@ use hyper::{
 use s3::{error::S3Error, Bucket};
 use serde::{Deserialize, Serialize};
 use serde_json::from_slice;
-use std::{collections::HashMap, env::var, sync::Arc};
-use std::net::{IpAddr, SocketAddr};
-use std::num::NonZeroU32;
-use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
-use hkdf::Hkdf;
 use sha2::Sha256;
+use std::{
+    collections::HashMap,
+    env::var,
+    net::{IpAddr, SocketAddr},
+    num::NonZeroU32,
+    sync::Arc,
+};
 use tokio::sync::RwLock;
 
 pub const AUTH_DATA_LOCATION: &str = "authdata";
@@ -32,7 +36,7 @@ pub struct AuthChecker {
     //deliberately not using dashmap as I want to be able to replace the entire map
     entries: Arc<RwLock<HashMap<String, UsernameAndPassword>>>,
     encryption_key: Key<Aes256Gcm>,
-    rate_limiter: Arc<DefaultKeyedRateLimiter<IpAddr>>
+    rate_limiter: Arc<DefaultKeyedRateLimiter<IpAddr>>,
 }
 
 pub enum AuthReturn {
@@ -72,12 +76,14 @@ impl AuthChecker {
             Self::read_from_s3(bucket, &encryption_key).await?,
         ));
 
-        let rate_limiter = Arc::new(RateLimiter::keyed(Quota::per_minute(NonZeroU32::new(100).unwrap())));
+        let rate_limiter = Arc::new(RateLimiter::keyed(Quota::per_minute(
+            NonZeroU32::new(100).unwrap(),
+        )));
 
         Ok(Self {
             entries,
             encryption_key,
-            rate_limiter
+            rate_limiter,
         })
     }
 
@@ -171,7 +177,12 @@ impl AuthChecker {
         Ok(())
     }
 
-    pub async fn check_auth(&self, path: &str, req: Request<Incoming>, remote_addr: SocketAddr) -> AuthReturn {
+    pub async fn check_auth(
+        &self,
+        path: &str,
+        req: Request<Incoming>,
+        remote_addr: SocketAddr,
+    ) -> AuthReturn {
         let readable = self.entries.read().await;
         let Some(UsernameAndPassword {
             username,
@@ -188,7 +199,6 @@ impl AuthChecker {
         if self.rate_limiter.check_key(&ip).is_err() {
             return empty_with_code(StatusCode::TOO_MANY_REQUESTS).into();
         }
-
 
         let password_hash = match PasswordHash::new(&stored_key) {
             Ok(x) => x,

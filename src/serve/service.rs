@@ -11,12 +11,11 @@ use hyper::{
 };
 use path_clean::PathClean;
 use soketto::handshake::http::{is_upgrade_request, Server};
-use std::{future::Future, path::Path, pin::Pin, sync::Arc};
-use std::net::SocketAddr;
+use std::{future::Future, net::SocketAddr, path::Path, pin::Pin, sync::Arc};
 
 pub struct ServeService {
     state: State,
-    remote_ip: SocketAddr
+    remote_ip: SocketAddr,
 }
 
 impl ServeService {
@@ -32,7 +31,7 @@ impl Service<Request<Incoming>> for ServeService {
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
         let state = self.state.clone();
-        let remote_addr = self.remote_ip.clone();
+        let remote_addr = self.remote_ip;
         let livereload = state.live_reloader();
 
         Box::pin(async move {
@@ -121,7 +120,7 @@ async fn serve_post(
 async fn serve_get_head(
     req: Request<Incoming>,
     state: State,
-    remote_addr: SocketAddr
+    remote_addr: SocketAddr,
 ) -> Result<Response<Full<Bytes>>, http::Error> {
     let path = req.uri().path();
     if path == "/healthcheck" {
