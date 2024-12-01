@@ -217,7 +217,7 @@ impl AuthChecker {
                 Ok(()) => true,
                 Err(Error::Password) => false,
                 Err(e) => {
-                    debug!(?e, "Error verifiying password");
+                    debug!(?e, "Error verifying password");
                     return empty_with_code(StatusCode::INTERNAL_SERVER_ERROR).into();
                 }
             };

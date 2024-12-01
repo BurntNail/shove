@@ -10,12 +10,15 @@ use hyper::{body::Incoming, Request, StatusCode};
 use moka::future::{Cache, CacheBuilder};
 use s3::Bucket;
 use std::{collections::HashSet, env, sync::Arc};
+use blake2::{Blake2b512, Digest};
 use tokio::sync::RwLock;
+use crate::protect::auth::AUTH_DATA_LOCATION;
 
 #[derive(Clone)]
 pub struct State {
     bucket: Box<Bucket>,
     upload_data: Arc<RwLock<UploadData>>,
+    last_auth_hash: Arc<RwLock<Vec<u8>>>,
     cache: Cache<String, (Vec<u8>, String)>,
     pub tigris_token: Option<Arc<str>>,
     live_reloader: LiveReloader,
@@ -50,6 +53,17 @@ impl State {
 
         let live_reloader = LiveReloader::new();
         let auth = AuthChecker::new(&bucket).await?;
+        let raw_auth_hash = {
+            let raw = match Self::read_file_from_s3(AUTH_DATA_LOCATION.to_string(), &bucket).await {
+                Ok((x, _, _)) => x,
+                Err(_e) => vec![]
+            };
+
+            let mut hasher = Blake2b512::new();
+            hasher.update(&raw);
+            hasher.finalize().to_vec()
+        };
+        let last_auth_hash = Arc::new(RwLock::new(raw_auth_hash));
 
         let cache = CacheBuilder::new(1024)
             .support_invalidation_closures()
@@ -102,6 +116,7 @@ impl State {
             tigris_token,
             live_reloader,
             auth,
+            last_auth_hash
         }))
     }
 
@@ -110,11 +125,25 @@ impl State {
     }
 
     #[instrument(skip(self))]
-    pub async fn reload(&self) -> color_eyre::Result<()> {
+    pub async fn check_and_reload(&self) -> color_eyre::Result<()> {
         trace!("Checking for reload");
 
-        if let Err(e) = self.auth.reload(&self.bucket).await {
-            error!(?e, "Error reloading auth checker");
+        let raw_auth_hash = {
+            let raw = match Self::read_file_from_s3(AUTH_DATA_LOCATION.to_string(), &self.bucket).await {
+                Ok((x, _, _)) => x,
+                Err(_e) => vec![]
+            };
+
+            let mut hasher = Blake2b512::new();
+            hasher.update(&raw);
+            hasher.finalize().to_vec()
+        };
+        if raw_auth_hash.as_slice() != self.last_auth_hash.read().await.as_slice() {
+            *self.last_auth_hash.write().await = raw_auth_hash;
+
+            if let Err(e) = self.auth.reload(&self.bucket).await {
+                error!(?e, "Error reloading auth checker");
+            }
         }
 
         let old_upload_data = self.upload_data.read().await.clone();

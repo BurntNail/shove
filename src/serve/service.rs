@@ -104,7 +104,7 @@ async fn serve_post(
             }
 
             info!("Reloading from webhook");
-            if let Err(e) = state.reload().await {
+            if let Err(e) = state.check_and_reload().await {
                 error!(?e, "Error reloading state");
                 empty_with_code(StatusCode::INTERNAL_SERVER_ERROR)
             } else {

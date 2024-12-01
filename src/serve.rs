@@ -83,7 +83,7 @@ pub async fn serve() -> color_eyre::Result<()> {
                         },
                         () = tokio::time::sleep(Duration::from_secs(60)) => {
                             info!("Reloading from timer");
-                            if let Err(e) = reload_state.reload().await {
+                            if let Err(e) = reload_state.check_and_reload().await {
                                 error!(?e, "Error reloading state");
                             }
                         }
