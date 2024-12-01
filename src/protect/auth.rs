@@ -171,7 +171,7 @@ impl AuthChecker {
             stored_key,
         }) = readable
             .iter()
-            .find(|(pattern, _)| path.contains(pattern.as_str()))
+            .find(|(pattern, _)| path.starts_with(pattern.as_str()))
             .map(|(_, uap)| uap.clone())
         else {
             return AuthReturn::AuthConfirmed(req);
