@@ -28,10 +28,9 @@ use std::{
     sync::Arc,
 };
 use std::fmt::Display;
-use std::sync::{LazyLock, OnceLock};
-use std::time::SystemTime;
+use std::sync::LazyLock;
 use tokio::sync::RwLock;
-use uuid::{ContextV7, Timestamp, Uuid};
+use uuid::Uuid;
 
 pub const AUTH_DATA_LOCATION: &str = "authdata";
 
@@ -43,7 +42,6 @@ pub struct AuthChecker {
     encryption_key: Key<Aes256Gcm>,
     rate_limiter: Arc<DefaultKeyedRateLimiter<IpAddr>>,
 }
-
 
 pub enum AuthReturn {
     AuthConfirmed(Request<Incoming>),
@@ -154,9 +152,41 @@ impl AuthChecker {
         Ok(())
     }
 
+    pub async fn get_patterns_and_usernames(&self) -> Vec<(String, Vec<String>)> {
+        let users = self.auth_users.read().await;
+        self.auth_realms.read().await.clone()
+            .into_iter()
+            .map(|(pat, uuids)| {
+                (
+                    pat,
+                    uuids
+                        .into_iter()
+                        .flat_map(|uuid| users.get(&uuid))
+                        .map(|x| x.username.clone())
+                        .collect()
+                    )
+            })
+            .collect()
+    }
+
+    pub async fn get_users (&self) -> Vec<(Uuid, String)> {
+        self.auth_users.read().await.clone().into_iter().map(|(uuid, uap)| (uuid, uap.username)).collect()
+    }
+
     pub async fn rm_pattern(&self, pattern: &str) {
+        self.auth_realms.write().await.remove(pattern);
+    }
+
+    pub async fn rm_user(&self, user: &Uuid) {
         let mut realms = self.auth_realms.write().await;
-        realms.remove(pattern);
+        for (_, list) in realms.iter_mut() {
+            list.retain_mut(|uuid| uuid != user);
+        }
+        self.auth_users.write().await.remove(user);
+    }
+
+    pub async fn get_all_realms (&self) -> Vec<String> {
+        self.auth_realms.read().await.iter().map(|(pat, _)| pat).cloned().collect()
     }
 
     pub async fn reload(&self, bucket: &Bucket) -> color_eyre::Result<()> {
@@ -166,13 +196,13 @@ impl AuthChecker {
         Ok(())
     }
 
-    pub async fn add_user (&self, username: impl Display, password: impl AsRef<str>) -> color_eyre::Result<Uuid> {
+    pub async fn add_user (&self, username: impl Display, password: impl AsRef<[u8]>) -> color_eyre::Result<Uuid> {
         let mut salt = [0; 32];
         getrandom(&mut salt)?;
         let saltstring = SaltString::encode_b64(&salt)?;
 
         let argon2 = Argon2::default();
-        let password_hash = argon2.hash_password(password.as_bytes(), &saltstring)?;
+        let password_hash = argon2.hash_password(password.as_ref(), &saltstring)?;
         let stored_key = password_hash.serialize().to_string();
 
         let uuid = Uuid::now_v7();
@@ -185,18 +215,40 @@ impl AuthChecker {
         Ok(uuid)
     }
 
+    pub async fn protect(
+        &self,
+        pattern: String,
+        uuids: Vec<Uuid>,
+    ) -> color_eyre::Result<()> {
+        let mut realms = self.auth_realms.write().await;
+
+        *realms.entry(pattern)
+            .or_default() = uuids;
+
+        Ok(())
+    }
+
     pub async fn protect_additional(
         &self,
         pattern: String,
         uuids: Vec<Uuid>,
     ) -> color_eyre::Result<()> {
-        let mut writeable = self.auth_realms.write().await;
+        let mut realms = self.auth_realms.write().await;
 
-        writeable.entry(pattern)
+        *realms.entry(pattern)
             .or_default()
             .extend(uuids);
 
         Ok(())
+    }
+
+    pub async fn get_users_with_access_to_realm (&self, pat: &str) -> Vec<Uuid> {
+        self.auth_realms.read().await
+            .iter()
+            .find(|(this_pat, _)| this_pat == &pat)
+            .map(|(_, uuids)| uuids)
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub async fn check_auth(
@@ -205,15 +257,16 @@ impl AuthChecker {
         req: Request<Incoming>,
         remote_addr: SocketAddr,
     ) -> AuthReturn {
-        static FAKE_PASSWORD_HASH: LazyLock<PasswordHash> = LazyLock::new(|| {
+
+        static FAKE_PASSWORD_HASH: LazyLock<PasswordHash<'static>> = LazyLock::new(|| {
             const FAKE_PASSWORD: &str = "thisismyfakepasswordtoreducesidechannelattackswhereyoumightbeabletoworkoutwhetheryourusernamewasaccurate";
+            static FAKE_PASSWORD_SALT: LazyLock<SaltString> = LazyLock::new(|| {
+                let mut salt = [0; 32];
+                getrandom(&mut salt).expect("unable to get salt for fake password");
+                SaltString::encode_b64(&salt).expect("unable to encode salt for fake password")
+            });
 
-            let mut salt = [0; 32];
-            getrandom(&mut salt).expect("unable to get salt for fake password");
-            let saltstring = SaltString::encode_b64(&salt).expect("unable to encode salt for fake password");
-
-            let argon2 = Argon2::default();
-            argon2.hash_password(FAKE_PASSWORD.as_bytes(), &saltstring).expect("unable to hash fake password")
+            Argon2::default().hash_password(FAKE_PASSWORD.as_bytes(), &*FAKE_PASSWORD_SALT).expect("unable to hash fake password")
         });
 
         let users: Vec<UsernameAndPassword> = {
