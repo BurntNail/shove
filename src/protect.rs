@@ -108,7 +108,7 @@ pub async fn protect() -> color_eyre::Result<()> {
                 .with_confirmation("Confirm Password?", "Passwords didn't match.")
                 .interact()?;
 
-            let uuid = existing_auth.add_user(username, password).await?;
+            let uuid = existing_auth.add_user(username.clone(), password).await?;
 
 
             let realms = existing_auth.get_all_realms().await;
@@ -119,7 +119,7 @@ pub async fn protect() -> color_eyre::Result<()> {
 
             for i in should_have_access_to {
                 let pat = realms[i].clone();
-                existing_auth.protect_additional(pat, vec![uuid])?;
+                existing_auth.protect_additional(pat, vec![uuid]).await;
             }
 
             existing_auth.save_to_s3(&bucket).await?;
@@ -145,7 +145,7 @@ pub async fn protect() -> color_eyre::Result<()> {
                 }
             };
 
-            existing_auth.protect(pat, uuids).await?;
+            existing_auth.protect(pat, uuids).await;
             existing_auth.save_to_s3(&bucket).await?;
         }
         6 => {
@@ -182,7 +182,7 @@ pub async fn protect() -> color_eyre::Result<()> {
                 }
             };
 
-            existing_auth.protect(pat, uuids).await?;
+            existing_auth.protect(pat, uuids).await;
             existing_auth.save_to_s3(&bucket).await?;
         }
         _ => unreachable!(),

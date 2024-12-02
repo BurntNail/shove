@@ -27,7 +27,6 @@ use std::{
     num::NonZeroU32,
     sync::Arc,
 };
-use std::fmt::Display;
 use std::sync::LazyLock;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -196,7 +195,7 @@ impl AuthChecker {
         Ok(())
     }
 
-    pub async fn add_user (&self, username: impl Display, password: impl AsRef<[u8]>) -> color_eyre::Result<Uuid> {
+    pub async fn add_user (&self, username: String, password: impl AsRef<[u8]>) -> color_eyre::Result<Uuid> {
         let mut salt = [0; 32];
         getrandom(&mut salt)?;
         let saltstring = SaltString::encode_b64(&salt)?;
@@ -219,27 +218,23 @@ impl AuthChecker {
         &self,
         pattern: String,
         uuids: Vec<Uuid>,
-    ) -> color_eyre::Result<()> {
+    ) {
         let mut realms = self.auth_realms.write().await;
 
         *realms.entry(pattern)
             .or_default() = uuids;
-
-        Ok(())
     }
 
     pub async fn protect_additional(
         &self,
         pattern: String,
         uuids: Vec<Uuid>,
-    ) -> color_eyre::Result<()> {
+    ) {
         let mut realms = self.auth_realms.write().await;
 
-        *realms.entry(pattern)
+        realms.entry(pattern)
             .or_default()
             .extend(uuids);
-
-        Ok(())
     }
 
     pub async fn get_users_with_access_to_realm (&self, pat: &str) -> Vec<Uuid> {
