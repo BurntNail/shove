@@ -342,7 +342,7 @@ impl AuthChecker {
             Ok(x) => x,
             Err(e) => {
                 error!(?e, "Unable to decode stored password key");
-                return empty_with_code(StatusCode::BAD_REQUEST).into();
+                return empty_with_code(StatusCode::INTERNAL_SERVER_ERROR).into();
             }
         };
 
