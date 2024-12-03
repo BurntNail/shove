@@ -1,8 +1,10 @@
 use crate::{protect::auth::AuthChecker, s3::get_bucket};
 use comfy_table::Table;
 use dialoguer::{theme::ColorfulTheme, Confirm, FuzzySelect, Input, MultiSelect, Password, Select};
+use crate::protect::auth_storer::Realm;
 
 pub mod auth;
+pub mod auth_storer;
 
 pub async fn protect() -> color_eyre::Result<()> {
     let theme = ColorfulTheme::default();
@@ -29,7 +31,7 @@ pub async fn protect() -> color_eyre::Result<()> {
             table.set_header(vec!["Pattern", "Usernames"]);
 
             for (pat, usernames) in existing_auth.get_patterns_and_usernames().await {
-                table.add_row(vec![pat, usernames.join(", ")]);
+                table.add_row(vec![format!("{pat:?}"), usernames.join(", ")]);
             }
 
             println!("{table}");
@@ -44,7 +46,7 @@ pub async fn protect() -> color_eyre::Result<()> {
             let items: Vec<String> = patterns_and_usernames
                 .clone()
                 .into_iter()
-                .map(|(pattern, username)| format!("{pattern}: {}", username.join(", ")))
+                .map(|(pattern, username)| format!("{pattern:?}: {}", username.join(", ")))
                 .collect();
             let choice = FuzzySelect::with_theme(&theme)
                 .with_prompt("Which realm to remove?")
@@ -57,7 +59,7 @@ pub async fn protect() -> color_eyre::Result<()> {
                 .with_prompt(format!("Confirm removal of {pattern_to_remove:?}"))
                 .interact()?
             {
-                existing_auth.rm_pattern(&pattern_to_remove).await;
+                existing_auth.rm_realm(&pattern_to_remove).await;
                 existing_auth.save_to_s3(&bucket).await?;
             }
         },
@@ -114,7 +116,7 @@ pub async fn protect() -> color_eyre::Result<()> {
             let realms = existing_auth.get_all_realms().await;
             let should_have_access_to = MultiSelect::with_theme(&theme)
                 .with_prompt(format!("Which realms should {username:?} have access to?"))
-                .items(&realms)
+                .items(&realms.iter().map(|x| format!("{x:?}")).collect::<Vec<_>>())
                 .interact()?;
 
             for i in should_have_access_to {
@@ -128,6 +130,7 @@ pub async fn protect() -> color_eyre::Result<()> {
             let pat = Input::with_theme(&theme)
                 .with_prompt("Pattern to protect?")
                 .interact()?;
+            let pat = Realm::StartsWith(pat);
 
             let uuids = {
                 let users = existing_auth.get_users().await;
@@ -149,7 +152,7 @@ pub async fn protect() -> color_eyre::Result<()> {
             existing_auth.save_to_s3(&bucket).await?;
         }
         6 => {
-            let mut patterns: Vec<String> = existing_auth.get_patterns_and_usernames().await.into_iter().map(|(pat, _)| pat).collect();
+            let mut patterns: Vec<String> = existing_auth.get_patterns_and_usernames().await.into_iter().map(|(pat, _)| format!("{pat:?}")).collect();
             if patterns.is_empty() {
                 println!("No existing realms.");
                 return Ok(());
@@ -160,7 +163,7 @@ pub async fn protect() -> color_eyre::Result<()> {
                 .items(&patterns)
                 .interact()?;
 
-            let pat = patterns.swap_remove(chosen_pat);
+            let pat = Realm::StartsWith(patterns.swap_remove(chosen_pat));
 
             let uuids = {
                 let users = existing_auth.get_users().await;

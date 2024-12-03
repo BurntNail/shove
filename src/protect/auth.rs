@@ -1,7 +1,6 @@
 use crate::serve::empty_with_code;
 use aes_gcm::{
-    aead::{Aead, Nonce},
-    Aes256Gcm, Key, KeyInit,
+    Aes256Gcm, Key,
 };
 use argon2::{
     password_hash::{Error, SaltString},
@@ -16,12 +15,9 @@ use hyper::{
     body::{Bytes, Incoming},
     http, Request, Response, StatusCode,
 };
-use s3::{error::S3Error, Bucket};
-use serde::{Deserialize, Serialize};
-use serde_json::{from_slice, from_value, to_vec, Value};
+use s3::Bucket;
 use sha2::Sha256;
 use std::{
-    collections::HashMap,
     env::var,
     net::{IpAddr, SocketAddr},
     num::NonZeroU32,
@@ -30,15 +26,13 @@ use std::{
 use std::sync::LazyLock;
 use tokio::sync::RwLock;
 use uuid::Uuid;
+use crate::protect::auth_storer::{AuthStorer, Realm};
 
-pub const AUTH_DATA_LOCATION: &str = "authdata";
 
 #[derive(Clone)]
 pub struct AuthChecker {
-    //deliberately not using dashmap as I want to be able to replace the entire map
-    auth_users: Arc<RwLock<HashMap<Uuid, UsernameAndPassword>>>,
-    auth_realms: Arc<RwLock<HashMap<String, Vec<Uuid>>>>,
-    encryption_key: Key<Aes256Gcm>,
+    auth: Arc<RwLock<AuthStorer>>,
+    stored_auth_encryption_key: Key<Aes256Gcm>,
     rate_limiter: Arc<DefaultKeyedRateLimiter<IpAddr>>,
 }
 
@@ -57,12 +51,6 @@ impl From<Result<Response<Full<Bytes>>, http::Error>> for AuthReturn {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-struct UsernameAndPassword {
-    username: String,
-    stored_key: String,
-}
-
 impl AuthChecker {
     pub async fn new(bucket: &Bucket) -> color_eyre::Result<Self> {
         let password =
@@ -75,175 +63,71 @@ impl AuthChecker {
 
         let encryption_key = Key::<Aes256Gcm>::from_slice(&key_output).to_owned();
 
-        let (realms, users) = Self::read_from_s3(bucket, &encryption_key).await?;
+        let auth_storer = AuthStorer::new(bucket, &encryption_key).await?;
 
         let rate_limiter = Arc::new(RateLimiter::keyed(Quota::per_minute(
             NonZeroU32::new(10).unwrap(),
         )));
 
         Ok(Self {
-            auth_realms: Arc::new(RwLock::new(realms)),
-            auth_users: Arc::new(RwLock::new(users)),
-            encryption_key,
+            auth: Arc::new(RwLock::new(auth_storer)),
+            stored_auth_encryption_key: encryption_key,
             rate_limiter,
         })
     }
 
-    async fn read_from_s3(
-        bucket: &Bucket,
-        key: &Key<Aes256Gcm>,
-    ) -> color_eyre::Result<(HashMap<String, Vec<Uuid>>, HashMap<Uuid, UsernameAndPassword>)> {
-        let contents = match bucket.get_object(AUTH_DATA_LOCATION).await {
-            Ok(x) => x.to_vec(),
-            Err(S3Error::HttpFailWithBody(404, _)) => return Ok((HashMap::new(), HashMap::new())),
-            Err(e) => return Err(e.into()),
-        };
-
-        let (nonce, ciphered_data) = contents.split_at(12);
-        let nonce = Nonce::<Aes256Gcm>::from_slice(nonce);
-        let cipher = Aes256Gcm::new(key);
-        let json = cipher.decrypt(nonce, ciphered_data)?;
-        let value: Value = from_slice(&json)?;
-
-        let Some(realms) = value.get("realms").cloned() else {
-            return Ok((HashMap::new(), HashMap::new()));
-        };
-        let Some(users) = value.get("users").cloned() else {
-            return Ok((HashMap::new(), HashMap::new()));
-        };
-
-        Ok((from_value(realms)?, from_value(users)?))
-    }
-
     pub async fn save_to_s3(self, bucket: &Bucket) -> color_eyre::Result<()> {
-        let mut nonce_data = [0; 12];
-        getrandom(&mut nonce_data)?;
-        let nonce = Nonce::<Aes256Gcm>::from_slice(&nonce_data);
-
-        let sered = {
-            let auth_users = self.auth_users.read().await;
-            let auth_realms = self.auth_realms.read().await;
-
-            let auth_users = auth_users.clone();
-            let auth_realms = auth_realms.clone();
-
-            let obj = serde_json::json!({
-                "realms": auth_realms,
-                "users": auth_users
-            });
-            to_vec(&obj)?
-        };
-
-        let cipher = Aes256Gcm::new(&self.encryption_key);
-        let ciphered_data = cipher.encrypt(nonce, sered.as_slice())?;
-
-        let mut encrypted_data = nonce_data.to_vec();
-        encrypted_data.extend(ciphered_data);
-
-        bucket
-            .put_object_with_content_type(
-                AUTH_DATA_LOCATION,
-                &encrypted_data,
-                "application/octet-stream",
-            )
-            .await?;
-
-        Ok(())
+        self.auth.read().await.save(bucket, &self.stored_auth_encryption_key).await
     }
 
-    pub async fn get_patterns_and_usernames(&self) -> Vec<(String, Vec<String>)> {
-        let users = self.auth_users.read().await;
-        self.auth_realms.read().await.clone()
-            .into_iter()
-            .map(|(pat, uuids)| {
-                (
-                    pat,
-                    uuids
-                        .into_iter()
-                        .flat_map(|uuid| users.get(&uuid))
-                        .map(|x| x.username.clone())
-                        .collect()
-                    )
-            })
-            .collect()
+    pub async fn get_patterns_and_usernames(&self) -> Vec<(Realm, Vec<String>)> {
+        self.auth.read().await.get_patterns_and_usernames()
     }
 
     pub async fn get_users (&self) -> Vec<(Uuid, String)> {
-        self.auth_users.read().await.clone().into_iter().map(|(uuid, uap)| (uuid, uap.username)).collect()
+        self.auth.read().await.get_users()
     }
 
-    pub async fn rm_pattern(&self, pattern: &str) {
-        self.auth_realms.write().await.remove(pattern);
+    pub async fn rm_realm(&self, realm: &Realm) {
+        self.auth.write().await.rm_realm(realm);
     }
 
     pub async fn rm_user(&self, user: &Uuid) {
-        let mut realms = self.auth_realms.write().await;
-        for (_, list) in realms.iter_mut() {
-            list.retain_mut(|uuid| uuid != user);
-        }
-        self.auth_users.write().await.remove(user);
+        self.auth.write().await.rm_user(user);
     }
 
-    pub async fn get_all_realms (&self) -> Vec<String> {
-        self.auth_realms.read().await.iter().map(|(pat, _)| pat).cloned().collect()
+    pub async fn get_all_realms (&self) -> Vec<Realm> {
+        self.auth.read().await.get_all_realms()
     }
 
     pub async fn reload(&self, bucket: &Bucket) -> color_eyre::Result<()> {
-        let (realms, users) = Self::read_from_s3(bucket, &self.encryption_key).await?;
-        *self.auth_realms.write().await = realms;
-        *self.auth_users.write().await = users;
+        let new_version = AuthStorer::new(bucket, &self.stored_auth_encryption_key).await?;
+        *self.auth.write().await = new_version;
         Ok(())
     }
 
     pub async fn add_user (&self, username: String, password: impl AsRef<[u8]>) -> color_eyre::Result<Uuid> {
-        let mut salt = [0; 32];
-        getrandom(&mut salt)?;
-        let saltstring = SaltString::encode_b64(&salt)?;
-
-        let argon2 = Argon2::default();
-        let password_hash = argon2.hash_password(password.as_ref(), &saltstring)?;
-        let stored_key = password_hash.serialize().to_string();
-
-        let uuid = Uuid::now_v7();
-
-        self.auth_users.write().await.insert(uuid, UsernameAndPassword {
-            username: username.to_string(),
-            stored_key
-        });
-
-        Ok(uuid)
+        self.auth.write().await.add_user(username, password)
     }
 
     pub async fn protect(
         &self,
-        pattern: String,
+        pattern: Realm,
         uuids: Vec<Uuid>,
     ) {
-        let mut realms = self.auth_realms.write().await;
-
-        *realms.entry(pattern)
-            .or_default() = uuids;
+        self.auth.write().await.protect(pattern, uuids);
     }
 
     pub async fn protect_additional(
         &self,
-        pattern: String,
+        pattern: Realm,
         uuids: Vec<Uuid>,
     ) {
-        let mut realms = self.auth_realms.write().await;
-
-        realms.entry(pattern)
-            .or_default()
-            .extend(uuids);
+        self.auth.write().await.protect_additional(pattern, uuids);
     }
 
-    pub async fn get_users_with_access_to_realm (&self, pat: &str) -> Vec<Uuid> {
-        self.auth_realms.read().await
-            .iter()
-            .find(|(this_pat, _)| this_pat == &pat)
-            .map(|(_, uuids)| uuids)
-            .cloned()
-            .unwrap_or_default()
+    pub async fn get_users_with_access_to_realm (&self, pat: &Realm) -> Vec<Uuid> {
+        self.auth.read().await.get_users_with_access_to_realm(pat)
     }
 
     pub async fn check_auth(
@@ -262,18 +146,8 @@ impl AuthChecker {
             hashed.serialize().to_string()
         });
 
-        let users: Vec<UsernameAndPassword> = {
-            let realms = self.auth_realms.read().await;
-            let users = self.auth_users.read().await;
-            let Some(uuids) = realms
-                .iter()
-                .find(|(pattern, _)| path.starts_with(pattern.as_str()))
-                .map(|(_, uap)| uap.clone())
-            else {
-                return AuthReturn::AuthConfirmed(req);
-            };
-
-            uuids.into_iter().filter_map(|uuid| users.get(&uuid)).cloned().collect()
+        let Some(users) = self.auth.read().await.find_users_with_access(path) else {
+            return AuthReturn::AuthConfirmed(req);
         };
 
         let ip = remote_addr.ip();
@@ -330,7 +204,7 @@ impl AuthChecker {
         let (provided_username, provided_password) = decoded.split_at(colon_index);
         let provided_password = &provided_password[1..];
 
-        let Some(UsernameAndPassword {username: _, stored_key}) = users.into_iter().find(|x| x.username == provided_username) else {
+        let Some(stored_key) = users.get(provided_username) else {
             debug!("Usernames didn't match for auth");
             let fake_password_hash = match PasswordHash::new(&FAKE_PASSWORD) {
                 Ok(x) => x,
@@ -343,7 +217,7 @@ impl AuthChecker {
             return empty_with_code(StatusCode::UNAUTHORIZED).into();
         };
 
-        let password_hash = match PasswordHash::new(&stored_key) {
+        let password_hash = match PasswordHash::new(stored_key) {
             Ok(x) => x,
             Err(e) => {
                 error!(?e, "Unable to decode stored password key");
