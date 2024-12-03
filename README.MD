@@ -1,6 +1,6 @@
 # `shove`
 
-`shove`, at it's core is an 🚀blazing🚀 fast HTTP server designed to serve the contents of an S3 bucket.
+`shove`, at it's core is a 🚀blazing🚀 fast HTTP server designed to serve the contents of an S3 bucket.
 
 Of course, there's plenty more features, including but not limited to:
 - HTTP Basic Auth for protecting paths
