@@ -1,8 +1,5 @@
 use crate::{
-    protect::{
-        auth::{AuthChecker, AuthReturn},
-        auth_storer::AUTH_DATA_LOCATION,
-    },
+    protect::auth::{AuthChecker, AuthReturn, AUTH_DATA_LOCATION},
     s3::{get_bucket, get_upload_data},
     serve::livereload::LiveReloader,
     UploadData,

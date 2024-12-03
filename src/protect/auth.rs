@@ -23,6 +23,8 @@ use std::{
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+pub const AUTH_DATA_LOCATION: &str = "authdata";
+
 #[derive(Clone)]
 pub struct AuthChecker {
     auth: Arc<RwLock<AuthStorer>>,

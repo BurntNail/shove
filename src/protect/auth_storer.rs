@@ -1,3 +1,4 @@
+use crate::protect::auth::AUTH_DATA_LOCATION;
 use aes_gcm::{
     aead::{Aead, Nonce},
     Aes256Gcm, Key, KeyInit,
@@ -23,8 +24,6 @@ static AUTH_KEY: LazyLock<Key<Aes256Gcm>> = LazyLock::new(|| {
 
     Key::<Aes256Gcm>::from_slice(&key_output).to_owned()
 });
-
-pub const AUTH_DATA_LOCATION: &str = "authdata";
 
 #[derive(Serialize, Deserialize, Clone, Hash, Eq, PartialEq, Debug)]
 pub enum Realm {
