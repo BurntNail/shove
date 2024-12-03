@@ -1,7 +1,6 @@
-use crate::serve::empty_with_code;
-use aes_gcm::{
-    aead::{Aead, Nonce},
-    Aes256Gcm, Key, KeyInit,
+use crate::{
+    protect::auth_storer::{AuthStorer, Realm},
+    serve::empty_with_code,
 };
 use argon2::{
     password_hash::{Error, SaltString},
@@ -10,32 +9,25 @@ use argon2::{
 use base64::{prelude::BASE64_STANDARD, Engine};
 use getrandom::getrandom;
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
-use hkdf::Hkdf;
 use http_body_util::Full;
 use hyper::{
     body::{Bytes, Incoming},
     http, Request, Response, StatusCode,
 };
-use s3::{error::S3Error, Bucket};
-use serde::{Deserialize, Serialize};
-use serde_json::from_slice;
-use sha2::Sha256;
+use s3::Bucket;
 use std::{
-    collections::HashMap,
-    env::var,
     net::{IpAddr, SocketAddr},
     num::NonZeroU32,
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
 use tokio::sync::RwLock;
+use uuid::Uuid;
 
 pub const AUTH_DATA_LOCATION: &str = "authdata";
 
 #[derive(Clone)]
 pub struct AuthChecker {
-    //deliberately not using dashmap as I want to be able to replace the entire map
-    entries: Arc<RwLock<HashMap<String, UsernameAndPassword>>>,
-    encryption_key: Key<Aes256Gcm>,
+    auth: Arc<RwLock<AuthStorer>>,
     rate_limiter: Arc<DefaultKeyedRateLimiter<IpAddr>>,
 }
 
@@ -54,127 +46,68 @@ impl From<Result<Response<Full<Bytes>>, http::Error>> for AuthReturn {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-struct UsernameAndPassword {
-    username: String,
-    stored_key: String,
-}
-
 impl AuthChecker {
     pub async fn new(bucket: &Bucket) -> color_eyre::Result<Self> {
-        let password =
-            var("AUTH_ENCRYPTION_KEY").expect("unable to find env var AUTH_ENCRYPTION_KEY");
-        let salt = &bucket.name;
-
-        let hk = Hkdf::<Sha256>::new(Some(salt.as_bytes()), password.as_bytes());
-        let mut key_output = [0; 32];
-        hk.expand(b"Auth Encryption Key", &mut key_output)?;
-
-        let encryption_key = Key::<Aes256Gcm>::from_slice(&key_output).to_owned();
-
-        let entries = Arc::new(RwLock::new(
-            Self::read_from_s3(bucket, &encryption_key).await?,
-        ));
+        let auth_storer = AuthStorer::new(bucket).await?;
 
         let rate_limiter = Arc::new(RateLimiter::keyed(Quota::per_minute(
             NonZeroU32::new(10).unwrap(),
         )));
 
         Ok(Self {
-            entries,
-            encryption_key,
+            auth: Arc::new(RwLock::new(auth_storer)),
             rate_limiter,
         })
     }
 
-    async fn read_from_s3(
-        bucket: &Bucket,
-        key: &Key<Aes256Gcm>,
-    ) -> color_eyre::Result<HashMap<String, UsernameAndPassword>> {
-        let contents = match bucket.get_object(AUTH_DATA_LOCATION).await {
-            Ok(x) => x.to_vec(),
-            Err(S3Error::HttpFailWithBody(404, _)) => return Ok(HashMap::new()),
-            Err(e) => return Err(e.into()),
-        };
-
-        let (nonce, ciphered_data) = contents.split_at(12);
-        let nonce = Nonce::<Aes256Gcm>::from_slice(nonce);
-        let cipher = Aes256Gcm::new(key);
-
-        let json = cipher.decrypt(nonce, ciphered_data)?;
-        Ok(from_slice(&json)?)
-    }
-
     pub async fn save_to_s3(self, bucket: &Bucket) -> color_eyre::Result<()> {
-        let mut nonce_data = [0; 12];
-        getrandom(&mut nonce_data)?;
-        let nonce = Nonce::<Aes256Gcm>::from_slice(&nonce_data);
-
-        let readable = self.entries.read().await;
-        let sered = serde_json::to_vec(&*readable)?;
-
-        let cipher = Aes256Gcm::new(&self.encryption_key);
-        let ciphered_data = cipher.encrypt(nonce, sered.as_slice())?;
-
-        let mut encrypted_data = nonce_data.to_vec();
-        encrypted_data.extend(ciphered_data);
-
-        bucket
-            .put_object_with_content_type(
-                AUTH_DATA_LOCATION,
-                &encrypted_data,
-                "application/octet-stream",
-            )
-            .await?;
-
-        Ok(())
+        self.auth.read().await.save(bucket).await
     }
 
-    pub async fn rm_pattern(&self, pattern: &str) {
-        let mut entries = self.entries.write().await;
-        entries.remove(pattern);
+    pub async fn get_patterns_and_usernames(&self) -> Vec<(Realm, Vec<String>)> {
+        self.auth.read().await.get_patterns_and_usernames()
     }
 
-    pub async fn get_patterns_and_usernames(&self) -> Vec<(String, String)> {
-        self.entries
-            .read()
-            .await
-            .iter()
-            .map(|(pat, uap)| (pat.clone(), uap.username.clone()))
-            .collect()
+    pub async fn get_users(&self) -> Vec<(Uuid, String)> {
+        self.auth.read().await.get_users()
+    }
+
+    pub async fn rm_realm(&self, realm: &Realm) {
+        self.auth.write().await.rm_realm(realm);
+    }
+
+    pub async fn rm_user(&self, user: &Uuid) {
+        self.auth.write().await.rm_user(user);
+    }
+
+    pub async fn get_all_realms(&self) -> Vec<Realm> {
+        self.auth.read().await.get_all_realms()
     }
 
     pub async fn reload(&self, bucket: &Bucket) -> color_eyre::Result<()> {
-        let entries = Self::read_from_s3(bucket, &self.encryption_key).await?;
-        *self.entries.write().await = entries;
+        let new_version = AuthStorer::new(bucket).await?;
+        *self.auth.write().await = new_version;
         Ok(())
     }
 
-    pub async fn protect(
-        &mut self,
-        pattern: String,
+    pub async fn add_user(
+        &self,
         username: String,
-        password: String,
-    ) -> color_eyre::Result<()> {
-        let mut salt = [0; 32];
-        getrandom(&mut salt)?;
-        let saltstring = SaltString::encode_b64(&salt)?;
+        password: impl AsRef<[u8]>,
+    ) -> color_eyre::Result<Uuid> {
+        self.auth.write().await.add_user(username, password)
+    }
 
-        let argon2 = Argon2::default();
-        let password_hash = argon2.hash_password(password.as_bytes(), &saltstring)?;
-        let stored_key = password_hash.serialize().to_string();
+    pub async fn protect(&self, pattern: Realm, uuids: Vec<Uuid>) {
+        self.auth.write().await.protect(pattern, uuids);
+    }
 
-        let mut writeable = self.entries.write().await;
+    pub async fn protect_additional(&self, pattern: Realm, uuids: Vec<Uuid>) {
+        self.auth.write().await.protect_additional(pattern, uuids);
+    }
 
-        writeable.insert(
-            pattern,
-            UsernameAndPassword {
-                username,
-                stored_key,
-            },
-        );
-
-        Ok(())
+    pub async fn get_users_with_access_to_realm(&self, pat: &Realm) -> Vec<Uuid> {
+        self.auth.read().await.get_users_with_access_to_realm(pat)
     }
 
     pub async fn check_auth(
@@ -183,15 +116,20 @@ impl AuthChecker {
         req: Request<Incoming>,
         remote_addr: SocketAddr,
     ) -> AuthReturn {
-        let readable = self.entries.read().await;
-        let Some(UsernameAndPassword {
-            username,
-            stored_key,
-        }) = readable
-            .iter()
-            .find(|(pattern, _)| path.starts_with(pattern.as_str()))
-            .map(|(_, uap)| uap.clone())
-        else {
+        static FAKE_PASSWORD: LazyLock<String> = LazyLock::new(|| {
+            const FAKE_PASSWORD_ACTUAL: &str = "thisismyfakepasswordtoreducesidechannelattackswhereyoumightbeabletoworkoutwhetheryourusernamewasanactualusernameforthisrealm";
+            let mut salt = [0; 32];
+            getrandom(&mut salt).expect("unable to get salt for fake password");
+            let saltstring =
+                SaltString::encode_b64(&salt).expect("unable to encode salt for fake password");
+
+            let hashed = Argon2::default()
+                .hash_password(FAKE_PASSWORD_ACTUAL.as_bytes(), &saltstring)
+                .expect("unable to hash fake password");
+            hashed.serialize().to_string()
+        });
+
+        let Some(users) = self.auth.read().await.find_users_with_access(path) else {
             return AuthReturn::AuthConfirmed(req);
         };
 
@@ -199,14 +137,6 @@ impl AuthChecker {
         if self.rate_limiter.check_key(&ip).is_err() {
             return empty_with_code(StatusCode::TOO_MANY_REQUESTS).into();
         }
-
-        let password_hash = match PasswordHash::new(&stored_key) {
-            Ok(x) => x,
-            Err(e) => {
-                error!(?e, "Unable to decode stored password key");
-                return empty_with_code(StatusCode::BAD_REQUEST).into();
-            }
-        };
 
         let headers = req.headers();
         let provided_auth_b64 = match headers.get("Authorization").cloned() {
@@ -257,6 +187,28 @@ impl AuthChecker {
         let (provided_username, provided_password) = decoded.split_at(colon_index);
         let provided_password = &provided_password[1..];
 
+        let Some(stored_key) = users.get(provided_username) else {
+            debug!("Usernames didn't match for auth");
+            let fake_password_hash = match PasswordHash::new(&FAKE_PASSWORD) {
+                Ok(x) => x,
+                Err(e) => {
+                    error!(?e, "Unable to decode stored fake password");
+                    return empty_with_code(StatusCode::INTERNAL_SERVER_ERROR).into();
+                }
+            };
+            let _ = Argon2::default()
+                .verify_password(provided_password.as_bytes(), &fake_password_hash);
+            return empty_with_code(StatusCode::UNAUTHORIZED).into();
+        };
+
+        let password_hash = match PasswordHash::new(stored_key) {
+            Ok(x) => x,
+            Err(e) => {
+                error!(?e, "Unable to decode stored password key");
+                return empty_with_code(StatusCode::INTERNAL_SERVER_ERROR).into();
+            }
+        };
+
         let password_matches =
             match Argon2::default().verify_password(provided_password.as_bytes(), &password_hash) {
                 Ok(()) => true,
@@ -266,11 +218,6 @@ impl AuthChecker {
                     return empty_with_code(StatusCode::INTERNAL_SERVER_ERROR).into();
                 }
             };
-
-        if username != provided_username {
-            debug!("Usernames didn't match for auth");
-            return empty_with_code(StatusCode::UNAUTHORIZED).into();
-        }
 
         if password_matches {
             AuthReturn::AuthConfirmed(req)
