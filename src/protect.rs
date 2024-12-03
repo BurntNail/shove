@@ -1,7 +1,9 @@
-use crate::s3::get_bucket;
+use crate::{
+    protect::auth_storer::{AuthStorer, Realm},
+    s3::get_bucket,
+};
 use comfy_table::Table;
 use dialoguer::{theme::ColorfulTheme, Confirm, FuzzySelect, Input, MultiSelect, Password, Select};
-use crate::protect::auth_storer::{AuthStorer, Realm};
 
 pub mod auth;
 pub mod auth_storer;
@@ -9,7 +11,6 @@ pub mod auth_storer;
 pub async fn protect() -> color_eyre::Result<()> {
     let bucket = get_bucket();
     let mut existing_auth = AuthStorer::new(&bucket).await?;
-
 
     let theme = ColorfulTheme::default();
     let choice = FuzzySelect::with_theme(&theme)
@@ -24,7 +25,6 @@ pub async fn protect() -> color_eyre::Result<()> {
             "Set Users with access to Realm",
         ])
         .interact()?;
-
 
     match choice {
         0 => {
@@ -64,7 +64,7 @@ pub async fn protect() -> color_eyre::Result<()> {
                 existing_auth.rm_realm(&pattern_to_remove);
                 existing_auth.save(&bucket).await?;
             }
-        },
+        }
         2 => {
             let mut table = Table::new();
             table.apply_modifier(comfy_table::modifiers::UTF8_ROUND_CORNERS);
@@ -75,7 +75,7 @@ pub async fn protect() -> color_eyre::Result<()> {
             }
 
             println!("{table}");
-        },
+        }
         3 => {
             let mut uuids_and_users = existing_auth.get_users();
             if uuids_and_users.is_empty() {
@@ -113,7 +113,6 @@ pub async fn protect() -> color_eyre::Result<()> {
                 .interact()?;
 
             let uuid = existing_auth.add_user(username.clone(), password)?;
-
 
             let realms = existing_auth.get_all_realms();
             let should_have_access_to = MultiSelect::with_theme(&theme)
@@ -154,7 +153,11 @@ pub async fn protect() -> color_eyre::Result<()> {
             existing_auth.save(&bucket).await?;
         }
         6 => {
-            let mut patterns: Vec<String> = existing_auth.get_patterns_and_usernames().into_iter().map(|(pat, _)| format!("{pat:?}")).collect();
+            let mut patterns: Vec<String> = existing_auth
+                .get_patterns_and_usernames()
+                .into_iter()
+                .map(|(pat, _)| format!("{pat:?}"))
+                .collect();
             if patterns.is_empty() {
                 println!("No existing realms.");
                 return Ok(());
@@ -173,7 +176,10 @@ pub async fn protect() -> color_eyre::Result<()> {
                     vec![]
                 } else {
                     let currently_has_access = existing_auth.get_users_with_access_to_realm(&pat);
-                    let highlighted: Vec<bool> = users.iter().map(|(uuid, _)| currently_has_access.contains(uuid)).collect();
+                    let highlighted: Vec<bool> = users
+                        .iter()
+                        .map(|(uuid, _)| currently_has_access.contains(uuid))
+                        .collect();
 
                     MultiSelect::with_theme(&theme)
                         .with_prompt("Which users should have access to this?")

@@ -1,5 +1,8 @@
 use crate::{
-    protect::auth::{AuthChecker, AuthReturn},
+    protect::{
+        auth::{AuthChecker, AuthReturn},
+        auth_storer::AUTH_DATA_LOCATION,
+    },
     s3::{get_bucket, get_upload_data},
     serve::livereload::LiveReloader,
     UploadData,
@@ -12,7 +15,6 @@ use s3::Bucket;
 use sha2::{Digest, Sha256};
 use std::{collections::HashSet, env, net::SocketAddr, sync::Arc};
 use tokio::sync::RwLock;
-use crate::protect::auth_storer::AUTH_DATA_LOCATION;
 
 #[derive(Clone)]
 pub struct State {

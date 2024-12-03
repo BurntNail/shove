@@ -1,4 +1,7 @@
-use crate::serve::empty_with_code;
+use crate::{
+    protect::auth_storer::{AuthStorer, Realm},
+    serve::empty_with_code,
+};
 use argon2::{
     password_hash::{Error, SaltString},
     Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
@@ -15,13 +18,10 @@ use s3::Bucket;
 use std::{
     net::{IpAddr, SocketAddr},
     num::NonZeroU32,
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
-use std::sync::LazyLock;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use crate::protect::auth_storer::{AuthStorer, Realm};
-
 
 #[derive(Clone)]
 pub struct AuthChecker {
@@ -46,7 +46,7 @@ impl From<Result<Response<Full<Bytes>>, http::Error>> for AuthReturn {
 
 impl AuthChecker {
     pub async fn new(bucket: &Bucket) -> color_eyre::Result<Self> {
-       let auth_storer = AuthStorer::new(bucket).await?;
+        let auth_storer = AuthStorer::new(bucket).await?;
 
         let rate_limiter = Arc::new(RateLimiter::keyed(Quota::per_minute(
             NonZeroU32::new(10).unwrap(),
@@ -66,7 +66,7 @@ impl AuthChecker {
         self.auth.read().await.get_patterns_and_usernames()
     }
 
-    pub async fn get_users (&self) -> Vec<(Uuid, String)> {
+    pub async fn get_users(&self) -> Vec<(Uuid, String)> {
         self.auth.read().await.get_users()
     }
 
@@ -78,7 +78,7 @@ impl AuthChecker {
         self.auth.write().await.rm_user(user);
     }
 
-    pub async fn get_all_realms (&self) -> Vec<Realm> {
+    pub async fn get_all_realms(&self) -> Vec<Realm> {
         self.auth.read().await.get_all_realms()
     }
 
@@ -88,27 +88,23 @@ impl AuthChecker {
         Ok(())
     }
 
-    pub async fn add_user (&self, username: String, password: impl AsRef<[u8]>) -> color_eyre::Result<Uuid> {
+    pub async fn add_user(
+        &self,
+        username: String,
+        password: impl AsRef<[u8]>,
+    ) -> color_eyre::Result<Uuid> {
         self.auth.write().await.add_user(username, password)
     }
 
-    pub async fn protect(
-        &self,
-        pattern: Realm,
-        uuids: Vec<Uuid>,
-    ) {
+    pub async fn protect(&self, pattern: Realm, uuids: Vec<Uuid>) {
         self.auth.write().await.protect(pattern, uuids);
     }
 
-    pub async fn protect_additional(
-        &self,
-        pattern: Realm,
-        uuids: Vec<Uuid>,
-    ) {
+    pub async fn protect_additional(&self, pattern: Realm, uuids: Vec<Uuid>) {
         self.auth.write().await.protect_additional(pattern, uuids);
     }
 
-    pub async fn get_users_with_access_to_realm (&self, pat: &Realm) -> Vec<Uuid> {
+    pub async fn get_users_with_access_to_realm(&self, pat: &Realm) -> Vec<Uuid> {
         self.auth.read().await.get_users_with_access_to_realm(pat)
     }
 
@@ -122,9 +118,12 @@ impl AuthChecker {
             const FAKE_PASSWORD_ACTUAL: &str = "thisismyfakepasswordtoreducesidechannelattackswhereyoumightbeabletoworkoutwhetheryourusernamewasanactualusernameforthisrealm";
             let mut salt = [0; 32];
             getrandom(&mut salt).expect("unable to get salt for fake password");
-            let saltstring = SaltString::encode_b64(&salt).expect("unable to encode salt for fake password");
+            let saltstring =
+                SaltString::encode_b64(&salt).expect("unable to encode salt for fake password");
 
-            let hashed = Argon2::default().hash_password(FAKE_PASSWORD_ACTUAL.as_bytes(), &saltstring).expect("unable to hash fake password");
+            let hashed = Argon2::default()
+                .hash_password(FAKE_PASSWORD_ACTUAL.as_bytes(), &saltstring)
+                .expect("unable to hash fake password");
             hashed.serialize().to_string()
         });
 
@@ -195,7 +194,8 @@ impl AuthChecker {
                     return empty_with_code(StatusCode::INTERNAL_SERVER_ERROR).into();
                 }
             };
-            let _ = Argon2::default().verify_password(provided_password.as_bytes(), &fake_password_hash);
+            let _ = Argon2::default()
+                .verify_password(provided_password.as_bytes(), &fake_password_hash);
             return empty_with_code(StatusCode::UNAUTHORIZED).into();
         };
 
@@ -216,7 +216,6 @@ impl AuthChecker {
                     return empty_with_code(StatusCode::INTERNAL_SERVER_ERROR).into();
                 }
             };
-
 
         if password_matches {
             AuthReturn::AuthConfirmed(req)
