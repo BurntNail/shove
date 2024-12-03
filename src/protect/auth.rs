@@ -70,19 +70,19 @@ impl AuthChecker {
             bail!("already reloading auth")
         };
 
-        let enc_bytes = AuthStorer::get_encrypted_bytes(bucket).await?;
-        let hashed = hash_raw_bytes(&enc_bytes);
+        let current_enc_bytes = AuthStorer::get_encrypted_bytes(bucket).await?;
+        let hashed = hash_raw_bytes(&current_enc_bytes);
 
         if *last_hash != hashed {
             *last_hash = hashed;
 
-            let new_version = AuthStorer::construct_from_enc_bytes(&enc_bytes)?;
+            let new_version = AuthStorer::construct_from_enc_bytes(&current_enc_bytes)?;
             *self.auth.write().await = new_version;
         }
         Ok(())
     }
 
-    pub async fn save_to_s3(self, bucket: &Bucket) -> color_eyre::Result<()> {
+    pub async fn save_to_s3(&self, bucket: &Bucket) -> color_eyre::Result<()> {
         self.auth.read().await.save(bucket).await
     }
 

@@ -68,6 +68,10 @@ impl AuthStorer {
     }
 
     pub(super) fn construct_from_enc_bytes (enc_bytes: &[u8]) -> color_eyre::Result<Self> {
+        if enc_bytes.is_empty() {
+            return Ok(Self::default());
+        }
+
         let (nonce, ciphered_data) = enc_bytes.split_at(12);
         let nonce = Nonce::<Aes256Gcm>::from_slice(nonce);
         let cipher = Aes256Gcm::new(&*AUTH_KEY);
