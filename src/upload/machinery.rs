@@ -51,19 +51,9 @@ pub async fn upload_dir_to_bucket(
 
         let hash = hash_raw_bytes(&contents)
             .into_iter()
-            .fold(Ok(String::new()), |mut acc, x| {
-                let mut err = None;
-                if let Ok(acc) = acc.as_mut() {
-                    if let Err(e) = write!(acc, "{x:x}") {
-                        err = Some(e);
-                    }
-                }
-
-                match err {
-                    None => acc,
-                    Some(e) => Err(e),
-                }
-            });
+            .try_fold(String::new(), |mut acc, x| {
+                write!(acc, "{x:x}").map(|()| acc)
+            })?;
 
         info!(len=?contents.len(), ?pb, "Read file");
 
