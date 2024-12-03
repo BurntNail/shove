@@ -2,11 +2,11 @@ use crate::{protect::protect, serve::serve, upload::upload};
 use color_eyre::owo_colors::OwoColorize;
 use dotenvy::var;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{collections::HashMap, env::args};
-use sha2::Sha256;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-pub fn hash_raw_bytes (bytes: impl AsRef<[u8]>) -> Vec<u8> {
+pub fn hash_raw_bytes(bytes: impl AsRef<[u8]>) -> Vec<u8> {
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     hasher.finalize().to_vec()

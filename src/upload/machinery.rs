@@ -1,4 +1,4 @@
-use crate::{s3::UPLOAD_DATA_LOCATION, UploadData};
+use crate::{hash_raw_bytes, s3::UPLOAD_DATA_LOCATION, UploadData};
 use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
 use new_mime_guess::MimeGuess;
@@ -49,13 +49,21 @@ pub async fn upload_dir_to_bucket(
 
         let mime_guess = new_mime_guess::from_path(&pb);
 
-        let mut hasher = Sha256::new();
-        hasher.update(&contents);
-        let hash = hasher.finalize().to_vec();
-        let hash = hash.into_iter().fold(String::new(), |mut acc, x| {
-            write!(&mut acc, "{x:x}").expect("unable to write to string to create hash");
-            acc
-        });
+        let hash = hash_raw_bytes(&contents)
+            .into_iter()
+            .fold(Ok(String::new()), |mut acc, x| {
+                let mut err = None;
+                if let Ok(acc) = acc.as_mut() {
+                    if let Err(e) = write!(acc, "{x:x}") {
+                        err = Some(e);
+                    }
+                }
+
+                match err {
+                    None => acc,
+                    Some(e) => Err(e),
+                }
+            });
 
         info!(len=?contents.len(), ?pb, "Read file");
 

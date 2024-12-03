@@ -127,23 +127,8 @@ impl State {
     pub async fn check_and_reload(&self) -> color_eyre::Result<()> {
         trace!("Checking for reload");
 
-        let raw_auth_hash = {
-            let raw =
-                match Self::read_file_from_s3(AUTH_DATA_LOCATION.to_string(), &self.bucket).await {
-                    Ok((x, _, _)) => x,
-                    Err(_e) => vec![],
-                };
-
-            let mut hasher = Sha256::new();
-            hasher.update(&raw);
-            hasher.finalize().to_vec()
-        };
-        if raw_auth_hash.as_slice() != self.last_auth_hash.read().await.as_slice() {
-            *self.last_auth_hash.write().await = raw_auth_hash;
-
-            if let Err(e) = self.auth.reload(&self.bucket).await {
-                error!(?e, "Error reloading auth checker");
-            }
+        if let Err(e) = self.auth.reload(&self.bucket).await {
+            error!(?e, "Error reloading auth checker");
         }
 
         let old_upload_data = self.upload_data.read().await.clone();
