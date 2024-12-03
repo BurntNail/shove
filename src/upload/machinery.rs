@@ -54,7 +54,7 @@ pub async fn upload_dir_to_bucket(
                 write!(acc, "{x:x}").map(|()| acc)
             })?;
 
-        info!(len=?contents.len(), ?pb, "Read file");
+        trace!(len=?contents.len(), ?pb, "Read file");
 
         Ok(Entry {
             path,
