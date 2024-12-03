@@ -3,7 +3,14 @@ use color_eyre::owo_colors::OwoColorize;
 use dotenvy::var;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, env::args};
+use sha2::Sha256;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+
+pub fn hash_raw_bytes (bytes: impl AsRef<[u8]>) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    hasher.finalize().to_vec()
+}
 
 pub mod protect;
 pub mod s3;
@@ -40,9 +47,8 @@ pub fn setup() {
         }
     }
 
-    match dotenvy::dotenv() {
-        Ok(file) => println!("Found env vars: {file:?}"),
-        Err(e) => eprintln!("Error finding env vars: {e:?}"),
+    if let Err(e) = dotenvy::dotenv() {
+        eprintln!("Error finding env vars: {e:?}")
     }
 
     let sub = tracing_subscriber::registry()
