@@ -60,8 +60,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-target-${{ hashFiles('Cargo.toml') }}
             ${{ runner.os }}-cargo-target
-
-
+            
       - name: Set short git commit SHA
         id: vars
         run: |
@@ -75,10 +74,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Inject Rust Cargo Cache  
+        uses: reproducible-containers/buildkit-cache-dance@4b2444fec0c0fb9dbf175a96c094720a692ef810 # v2.1.4
+        with:
+          cache-source: ~/.cargo
+      
+      - name: Inject Rust Target Cache  
+        uses: reproducible-containers/buildkit-cache-dance@4b2444fec0c0fb9dbf175a96c094720a692ef810 # v2.1.4
+        with:
+          cache-source: target
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: ghcr.io/burntnail/shove:${{ needs.commit-hash.outputs.commit_hash }},ghcr.io/burntnail/shove:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
