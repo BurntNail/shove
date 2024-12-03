@@ -252,16 +252,14 @@ impl AuthChecker {
         req: Request<Incoming>,
         remote_addr: SocketAddr,
     ) -> AuthReturn {
+        static FAKE_PASSWORD: LazyLock<String> = LazyLock::new(|| {
+            const FAKE_PASSWORD_ACTUAL: &str = "thisismyfakepasswordtoreducesidechannelattackswhereyoumightbeabletoworkoutwhetheryourusernamewasanactualusernameforthisrealm";
+            let mut salt = [0; 32];
+            getrandom(&mut salt).expect("unable to get salt for fake password");
+            let saltstring = SaltString::encode_b64(&salt).expect("unable to encode salt for fake password");
 
-        static FAKE_PASSWORD_HASH: LazyLock<PasswordHash<'static>> = LazyLock::new(|| {
-            const FAKE_PASSWORD: &str = "thisismyfakepasswordtoreducesidechannelattackswhereyoumightbeabletoworkoutwhetheryourusernamewasaccurate";
-            static FAKE_PASSWORD_SALT: LazyLock<SaltString> = LazyLock::new(|| {
-                let mut salt = [0; 32];
-                getrandom(&mut salt).expect("unable to get salt for fake password");
-                SaltString::encode_b64(&salt).expect("unable to encode salt for fake password")
-            });
-
-            Argon2::default().hash_password(FAKE_PASSWORD.as_bytes(), &*FAKE_PASSWORD_SALT).expect("unable to hash fake password")
+            let hashed = Argon2::default().hash_password(FAKE_PASSWORD_ACTUAL.as_bytes(), &saltstring).expect("unable to hash fake password");
+            hashed.serialize().to_string()
         });
 
         let users: Vec<UsernameAndPassword> = {
@@ -334,7 +332,14 @@ impl AuthChecker {
 
         let Some(UsernameAndPassword {username: _, stored_key}) = users.into_iter().find(|x| x.username == provided_username) else {
             debug!("Usernames didn't match for auth");
-            let _ = Argon2::default().verify_password(provided_password.as_bytes(), &FAKE_PASSWORD_HASH);
+            let fake_password_hash = match PasswordHash::new(&FAKE_PASSWORD) {
+                Ok(x) => x,
+                Err(e) => {
+                    error!(?e, "Unable to decode stored fake password");
+                    return empty_with_code(StatusCode::INTERNAL_SERVER_ERROR).into();
+                }
+            };
+            let _ = Argon2::default().verify_password(provided_password.as_bytes(), &fake_password_hash);
             return empty_with_code(StatusCode::UNAUTHORIZED).into();
         };
 
