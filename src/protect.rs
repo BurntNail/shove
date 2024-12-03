@@ -115,10 +115,14 @@ pub async fn protect() -> color_eyre::Result<()> {
             let uuid = existing_auth.add_user(username.clone(), password)?;
 
             let realms = existing_auth.get_all_realms();
-            let should_have_access_to = MultiSelect::with_theme(&theme)
-                .with_prompt(format!("Which realms should {username:?} have access to?"))
-                .items(&realms.iter().map(|x| format!("{x:?}")).collect::<Vec<_>>())
-                .interact()?;
+            let should_have_access_to = if !realms.is_empty() {
+                MultiSelect::with_theme(&theme)
+                    .with_prompt(format!("Which realms should {username:?} have access to?"))
+                    .items(&realms.iter().map(|x| format!("{x:?}")).collect::<Vec<_>>())
+                    .interact()?
+            } else {
+                vec![]
+            };
 
             for i in should_have_access_to {
                 let pat = realms[i].clone();
