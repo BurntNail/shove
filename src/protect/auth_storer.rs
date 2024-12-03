@@ -1,14 +1,29 @@
 use std::collections::HashMap;
+use std::env::var;
+use std::sync::LazyLock;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, aead::Nonce};
 use aes_gcm::aead::Aead;
 use argon2::{Argon2, PasswordHasher};
 use argon2::password_hash::SaltString;
 use getrandom::getrandom;
+use hkdf::Hkdf;
 use s3::Bucket;
 use s3::error::S3Error;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_slice, to_vec};
+use sha2::Sha256;
 use uuid::Uuid;
+
+static AUTH_KEY: LazyLock<Key::<Aes256Gcm>> = LazyLock::new(|| {
+    let password = var("AUTH_ENCRYPTION_KEY").expect("unable to find env var AUTH_ENCRYPTION_KEY");
+    let salt = var("BUCKET_NAME").expect("unable to find env var BUCKET_NAME");
+
+    let hk = Hkdf::<Sha256>::new(Some(salt.as_bytes()), password.as_bytes());
+    let mut key_output = [0; 32];
+    hk.expand(b"Auth Encryption Key", &mut key_output).expect("unable to expand key");
+
+    Key::<Aes256Gcm>::from_slice(&key_output).to_owned()
+});
 
 pub const AUTH_DATA_LOCATION: &str = "authdata";
 
@@ -38,7 +53,7 @@ pub struct AuthStorer {
 }
 
 impl AuthStorer {
-    pub async fn new (bucket: &Bucket, key: &Key<Aes256Gcm>) -> color_eyre::Result<Self> {
+    pub async fn new (bucket: &Bucket) -> color_eyre::Result<Self> {
         let contents = match bucket.get_object(AUTH_DATA_LOCATION).await {
             Ok(x) => x.to_vec(),
             Err(S3Error::HttpFailWithBody(404, _)) => return Ok(Self::default()),
@@ -47,20 +62,20 @@ impl AuthStorer {
 
         let (nonce, ciphered_data) = contents.split_at(12);
         let nonce = Nonce::<Aes256Gcm>::from_slice(nonce);
-        let cipher = Aes256Gcm::new(key);
+        let cipher = Aes256Gcm::new(&*AUTH_KEY);
         let json = cipher.decrypt(nonce, ciphered_data)?;
 
         Ok(from_slice(&json)?)
     }
 
-    pub async fn save (&self, bucket: &Bucket, key: &Key<Aes256Gcm>) -> color_eyre::Result<()> {
+    pub async fn save (&self, bucket: &Bucket) -> color_eyre::Result<()> {
         let mut nonce_data = [0; 12];
         getrandom(&mut nonce_data)?;
         let nonce = Nonce::<Aes256Gcm>::from_slice(&nonce_data);
 
         let json = to_vec(&self)?;
 
-        let cipher = Aes256Gcm::new(key);
+        let cipher = Aes256Gcm::new(&*AUTH_KEY);
         let ciphered_data = cipher.encrypt(nonce, json.as_slice())?;
 
         let mut encrypted_data = nonce_data.to_vec();

@@ -1,7 +1,4 @@
 use crate::serve::empty_with_code;
-use aes_gcm::{
-    Aes256Gcm, Key,
-};
 use argon2::{
     password_hash::{Error, SaltString},
     Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
@@ -9,16 +6,13 @@ use argon2::{
 use base64::{prelude::BASE64_STANDARD, Engine};
 use getrandom::getrandom;
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
-use hkdf::Hkdf;
 use http_body_util::Full;
 use hyper::{
     body::{Bytes, Incoming},
     http, Request, Response, StatusCode,
 };
 use s3::Bucket;
-use sha2::Sha256;
 use std::{
-    env::var,
     net::{IpAddr, SocketAddr},
     num::NonZeroU32,
     sync::Arc,
@@ -32,7 +26,6 @@ use crate::protect::auth_storer::{AuthStorer, Realm};
 #[derive(Clone)]
 pub struct AuthChecker {
     auth: Arc<RwLock<AuthStorer>>,
-    stored_auth_encryption_key: Key<Aes256Gcm>,
     rate_limiter: Arc<DefaultKeyedRateLimiter<IpAddr>>,
 }
 
@@ -53,17 +46,7 @@ impl From<Result<Response<Full<Bytes>>, http::Error>> for AuthReturn {
 
 impl AuthChecker {
     pub async fn new(bucket: &Bucket) -> color_eyre::Result<Self> {
-        let password =
-            var("AUTH_ENCRYPTION_KEY").expect("unable to find env var AUTH_ENCRYPTION_KEY");
-        let salt = &bucket.name;
-
-        let hk = Hkdf::<Sha256>::new(Some(salt.as_bytes()), password.as_bytes());
-        let mut key_output = [0; 32];
-        hk.expand(b"Auth Encryption Key", &mut key_output)?;
-
-        let encryption_key = Key::<Aes256Gcm>::from_slice(&key_output).to_owned();
-
-        let auth_storer = AuthStorer::new(bucket, &encryption_key).await?;
+       let auth_storer = AuthStorer::new(bucket).await?;
 
         let rate_limiter = Arc::new(RateLimiter::keyed(Quota::per_minute(
             NonZeroU32::new(10).unwrap(),
@@ -71,13 +54,12 @@ impl AuthChecker {
 
         Ok(Self {
             auth: Arc::new(RwLock::new(auth_storer)),
-            stored_auth_encryption_key: encryption_key,
             rate_limiter,
         })
     }
 
     pub async fn save_to_s3(self, bucket: &Bucket) -> color_eyre::Result<()> {
-        self.auth.read().await.save(bucket, &self.stored_auth_encryption_key).await
+        self.auth.read().await.save(bucket).await
     }
 
     pub async fn get_patterns_and_usernames(&self) -> Vec<(Realm, Vec<String>)> {
@@ -101,7 +83,7 @@ impl AuthChecker {
     }
 
     pub async fn reload(&self, bucket: &Bucket) -> color_eyre::Result<()> {
-        let new_version = AuthStorer::new(bucket, &self.stored_auth_encryption_key).await?;
+        let new_version = AuthStorer::new(bucket).await?;
         *self.auth.write().await = new_version;
         Ok(())
     }
