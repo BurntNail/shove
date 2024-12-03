@@ -1,5 +1,5 @@
 use crate::{
-    protect::auth::{AuthChecker, AuthReturn, AUTH_DATA_LOCATION},
+    protect::auth::{AuthChecker, AuthReturn},
     s3::{get_bucket, get_upload_data},
     serve::livereload::LiveReloader,
     UploadData,
@@ -9,7 +9,6 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use hyper::{body::Incoming, Request, StatusCode};
 use moka::future::{Cache, CacheBuilder};
 use s3::Bucket;
-use sha2::{Digest, Sha256};
 use std::{collections::HashSet, env, net::SocketAddr, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -17,7 +16,6 @@ use tokio::sync::RwLock;
 pub struct State {
     bucket: Box<Bucket>,
     upload_data: Arc<RwLock<UploadData>>,
-    last_auth_hash: Arc<RwLock<Vec<u8>>>,
     cache: Cache<String, (Vec<u8>, String)>,
     pub tigris_token: Option<Arc<str>>,
     live_reloader: LiveReloader,
@@ -52,17 +50,6 @@ impl State {
 
         let live_reloader = LiveReloader::new();
         let auth = AuthChecker::new(&bucket).await?;
-        let raw_auth_hash = {
-            let raw = match Self::read_file_from_s3(AUTH_DATA_LOCATION.to_string(), &bucket).await {
-                Ok((x, _, _)) => x,
-                Err(_e) => vec![],
-            };
-
-            let mut hasher = Sha256::new();
-            hasher.update(&raw);
-            hasher.finalize().to_vec()
-        };
-        let last_auth_hash = Arc::new(RwLock::new(raw_auth_hash));
 
         let cache = CacheBuilder::new(256)
             .support_invalidation_closures()
@@ -115,7 +102,6 @@ impl State {
             tigris_token,
             live_reloader,
             auth,
-            last_auth_hash,
         }))
     }
 
@@ -127,7 +113,7 @@ impl State {
     pub async fn check_and_reload(&self) -> color_eyre::Result<()> {
         trace!("Checking for reload");
 
-        if let Err(e) = self.auth.reload(&self.bucket).await {
+        if let Err(e) = self.auth.check_and_reload(&self.bucket).await {
             error!(?e, "Error reloading auth checker");
         }
 

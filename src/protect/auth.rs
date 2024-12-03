@@ -1,4 +1,5 @@
 use crate::{
+    hash_raw_bytes,
     protect::auth_storer::{AuthStorer, Realm},
     serve::empty_with_code,
 };
@@ -20,7 +21,8 @@ use std::{
     num::NonZeroU32,
     sync::{Arc, LazyLock},
 };
-use tokio::sync::RwLock;
+use color_eyre::eyre::bail;
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
 pub const AUTH_DATA_LOCATION: &str = "authdata";
@@ -28,6 +30,7 @@ pub const AUTH_DATA_LOCATION: &str = "authdata";
 #[derive(Clone)]
 pub struct AuthChecker {
     auth: Arc<RwLock<AuthStorer>>,
+    last_hash: Arc<Mutex<Vec<u8>>>,
     rate_limiter: Arc<DefaultKeyedRateLimiter<IpAddr>>,
 }
 
@@ -48,7 +51,8 @@ impl From<Result<Response<Full<Bytes>>, http::Error>> for AuthReturn {
 
 impl AuthChecker {
     pub async fn new(bucket: &Bucket) -> color_eyre::Result<Self> {
-        let auth_storer = AuthStorer::new(bucket).await?;
+        let (auth_storer, raw_bytes) = AuthStorer::new(bucket).await?;
+        let hashed_bytes = hash_raw_bytes(&raw_bytes);
 
         let rate_limiter = Arc::new(RateLimiter::keyed(Quota::per_minute(
             NonZeroU32::new(10).unwrap(),
@@ -56,8 +60,26 @@ impl AuthChecker {
 
         Ok(Self {
             auth: Arc::new(RwLock::new(auth_storer)),
+            last_hash: Arc::new(Mutex::new(hashed_bytes)),
             rate_limiter,
         })
+    }
+
+    pub async fn check_and_reload(&self, bucket: &Bucket) -> color_eyre::Result<()> {
+        let Ok(mut last_hash) = self.last_hash.try_lock() else {
+            bail!("already reloading auth")
+        };
+
+        let enc_bytes = AuthStorer::get_encrypted_bytes(bucket).await?;
+        let hashed = hash_raw_bytes(&enc_bytes);
+
+        if *last_hash != hashed {
+            *last_hash = hashed;
+
+            let new_version = AuthStorer::construct_from_enc_bytes(&enc_bytes)?;
+            *self.auth.write().await = new_version;
+        }
+        Ok(())
     }
 
     pub async fn save_to_s3(self, bucket: &Bucket) -> color_eyre::Result<()> {
@@ -82,12 +104,6 @@ impl AuthChecker {
 
     pub async fn get_all_realms(&self) -> Vec<Realm> {
         self.auth.read().await.get_all_realms()
-    }
-
-    pub async fn reload(&self, bucket: &Bucket) -> color_eyre::Result<()> {
-        let new_version = AuthStorer::new(bucket).await?;
-        *self.auth.write().await = new_version;
-        Ok(())
     }
 
     pub async fn add_user(

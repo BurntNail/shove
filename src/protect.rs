@@ -10,7 +10,7 @@ pub mod auth_storer;
 
 pub async fn protect() -> color_eyre::Result<()> {
     let bucket = get_bucket();
-    let mut existing_auth = AuthStorer::new(&bucket).await?;
+    let (mut existing_auth, _) = AuthStorer::new(&bucket).await?;
 
     let theme = ColorfulTheme::default();
     let choice = FuzzySelect::with_theme(&theme)

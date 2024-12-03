@@ -3,7 +3,6 @@ use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
 use new_mime_guess::MimeGuess;
 use s3::Bucket;
-use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Write,

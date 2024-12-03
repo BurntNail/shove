@@ -51,20 +51,31 @@ pub struct AuthStorer {
 }
 
 impl AuthStorer {
-    pub async fn new(bucket: &Bucket) -> color_eyre::Result<Self> {
-        let contents = match bucket.get_object(AUTH_DATA_LOCATION).await {
-            Ok(x) => x.to_vec(),
-            Err(S3Error::HttpFailWithBody(404, _)) => return Ok(Self::default()),
-            Err(e) => return Err(e.into()),
-        };
+    ///returns raw bytes from S3 as well
+    pub async fn new(bucket: &Bucket) -> color_eyre::Result<(Self, Vec<u8>)> {
+        let enc_bytes = Self::get_encrypted_bytes(bucket).await?;
+        let obj = Self::construct_from_enc_bytes(&enc_bytes)?;
 
-        let (nonce, ciphered_data) = contents.split_at(12);
+        Ok((obj, enc_bytes))
+    }
+
+    pub(super) async fn get_encrypted_bytes(bucket: &Bucket) -> color_eyre::Result<Vec<u8>> {
+        match bucket.get_object(AUTH_DATA_LOCATION).await {
+            Ok(x) => Ok(x.to_vec()),
+            Err(S3Error::HttpFailWithBody(404, _)) => Ok(vec![]),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub(super) fn construct_from_enc_bytes (enc_bytes: &[u8]) -> color_eyre::Result<Self> {
+        let (nonce, ciphered_data) = enc_bytes.split_at(12);
         let nonce = Nonce::<Aes256Gcm>::from_slice(nonce);
         let cipher = Aes256Gcm::new(&*AUTH_KEY);
         let json = cipher.decrypt(nonce, ciphered_data)?;
 
         Ok(from_slice(&json)?)
     }
+
 
     pub async fn save(&self, bucket: &Bucket) -> color_eyre::Result<()> {
         let mut nonce_data = [0; 12];
