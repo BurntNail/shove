@@ -1,7 +1,7 @@
 mod livereload;
+mod pages;
 mod service;
 mod state;
-mod pages;
 
 use crate::serve::{livereload::LiveReloader, service::ServeService, state::State};
 use http_body_util::Full;

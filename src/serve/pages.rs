@@ -1,17 +1,14 @@
-use std::collections::HashSet;
-use std::sync::Arc;
+use crate::{
+    hash_raw_bytes, s3::UPLOAD_DATA_LOCATION, serve::livereload::LiveReloader, UploadData,
+};
 use color_eyre::eyre::bail;
-use futures::stream::FuturesUnordered;
-use futures::StreamExt;
+use futures::{stream::FuturesUnordered, StreamExt};
 use hyper::StatusCode;
 use moka::future::{Cache, CacheBuilder};
-use s3::Bucket;
-use s3::error::S3Error;
+use s3::{error::S3Error, Bucket};
 use serde_json::from_slice;
+use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{Mutex, RwLock};
-use crate::s3::UPLOAD_DATA_LOCATION;
-use crate::serve::livereload::LiveReloader;
-use crate::{hash_raw_bytes, UploadData};
 
 #[derive(Clone)]
 pub struct Pages {
@@ -38,7 +35,7 @@ impl Pages {
         Ok((bytes, content_type.to_owned(), path))
     }
 
-    pub async fn new (bucket: &Bucket) -> color_eyre::Result<Option<Self>> {
+    pub async fn new(bucket: &Bucket) -> color_eyre::Result<Option<Self>> {
         let (upload_data, hash) = {
             let data = bucket.get_object(UPLOAD_DATA_LOCATION).await;
             match data {
@@ -47,11 +44,13 @@ impl Pages {
                     let ud: UploadData = from_slice(bytes)?;
                     let hash = hash_raw_bytes(bytes);
                     (ud, hash)
-                },
-                Err(e) => return match e {
-                    S3Error::HttpFailWithBody(404, _) => Ok(None),
-                    _ => Err(e.into()),
-                },
+                }
+                Err(e) => {
+                    return match e {
+                        S3Error::HttpFailWithBody(404, _) => Ok(None),
+                        _ => Err(e.into()),
+                    }
+                }
             }
         };
 
@@ -59,7 +58,7 @@ impl Pages {
             .support_invalidation_closures()
             .build();
 
-        match Self::read_file_from_s3(format!("{}/404.html", &upload_data.root), &bucket).await {
+        match Self::read_file_from_s3(format!("{}/404.html", &upload_data.root), bucket).await {
             Ok((contents, content_type, path)) => {
                 info!("Adding 404 path to cache");
                 cache.insert(path, (contents, content_type)).await;
@@ -99,7 +98,11 @@ impl Pages {
         }))
     }
 
-    pub async fn check_and_reload (&self, bucket: &Bucket, reloader: LiveReloader) -> color_eyre::Result<()> {
+    pub async fn check_and_reload(
+        &self,
+        bucket: &Bucket,
+        reloader: LiveReloader,
+    ) -> color_eyre::Result<()> {
         let Ok(last_upload_hash) = self.last_upload_hash.try_lock() else {
             bail!("Already reloading");
         };
@@ -172,7 +175,7 @@ impl Pages {
         Ok(())
     }
 
-    pub async fn get (&self, bucket: &Bucket, path: &str) -> Option<(Vec<u8>, String, StatusCode)> {
+    pub async fn get(&self, bucket: &Bucket, path: &str) -> Option<(Vec<u8>, String, StatusCode)> {
         let root = self.upload_data.read().await.clone().root;
         let path = format!("{root}{path}");
 

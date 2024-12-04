@@ -3,7 +3,12 @@ use crate::{
     serve::{empty_with_code, state::State},
 };
 use http_body_util::Full;
-use hyper::{body::{Bytes, Incoming}, header, http, service::Service, Method, Request, Response, StatusCode};
+use hyper::{
+    body::{Bytes, Incoming},
+    header, http,
+    service::Service,
+    Method, Request, Response, StatusCode,
+};
 use path_clean::PathClean;
 use soketto::handshake::http::{is_upgrade_request, Server};
 use std::{future::Future, net::SocketAddr, path::Path, pin::Pin, sync::Arc};

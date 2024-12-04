@@ -3,12 +3,12 @@ use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
 use new_mime_guess::MimeGuess;
 use s3::Bucket;
+use serde_json::from_slice;
 use std::{
     collections::{HashMap, HashSet},
     fmt::Write,
     path::PathBuf,
 };
-use serde_json::from_slice;
 use tokio::{fs::File, io::AsyncReadExt};
 use walkdir::WalkDir;
 
@@ -19,10 +19,7 @@ struct Entry {
     mime_guess: MimeGuess,
 }
 
-pub async fn upload_dir_to_bucket(
-    dir: &str,
-    bucket: &Bucket,
-) -> color_eyre::Result<()> {
+pub async fn upload_dir_to_bucket(dir: &str, bucket: &Bucket) -> color_eyre::Result<()> {
     async fn read_fs_file(pb: PathBuf) -> color_eyre::Result<Entry> {
         let Some(path) = pb.to_str().map(|x| x.to_string()) else {
             bail!("unable to get UTF-8 path")
@@ -82,7 +79,7 @@ pub async fn upload_dir_to_bucket(
         Ok(())
     }
 
-    async fn get_upload_data (bucket: &Bucket) -> color_eyre::Result<Option<UploadData>> {
+    async fn get_upload_data(bucket: &Bucket) -> color_eyre::Result<Option<UploadData>> {
         let Ok(data) = bucket.get_object(UPLOAD_DATA_LOCATION).await else {
             return Ok(None);
         };

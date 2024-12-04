@@ -1,12 +1,11 @@
 use crate::{
     protect::auth::{AuthChecker, AuthReturn},
     s3::get_bucket,
-    serve::livereload::LiveReloader,
+    serve::{livereload::LiveReloader, pages::Pages},
 };
 use hyper::{body::Incoming, Request, StatusCode};
 use s3::Bucket;
 use std::{env, net::SocketAddr, sync::Arc};
-use crate::serve::pages::Pages;
 
 #[derive(Clone)]
 pub struct State {
@@ -18,7 +17,6 @@ pub struct State {
 }
 
 impl State {
-
     #[instrument]
     pub async fn new() -> color_eyre::Result<Option<Self>> {
         let bucket = get_bucket();
@@ -36,7 +34,6 @@ impl State {
         } else {
             info!("Checking every 60s for reloads");
         }
-
 
         Ok(Some(Self {
             bucket,
@@ -58,7 +55,11 @@ impl State {
         if let Err(e) = self.auth.check_and_reload(&self.bucket).await {
             error!(?e, "Error reloading auth checker");
         }
-        if let Err(e) = self.pages.check_and_reload(&self.bucket, self.live_reloader.clone()).await {
+        if let Err(e) = self
+            .pages
+            .check_and_reload(&self.bucket, self.live_reloader.clone())
+            .await
+        {
             error!(?e, "Error reloading pages")
         }
 

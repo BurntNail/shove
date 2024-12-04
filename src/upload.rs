@@ -1,7 +1,4 @@
-use crate::{
-    s3::get_bucket,
-    upload::machinery::upload_dir_to_bucket,
-};
+use crate::{s3::get_bucket, upload::machinery::upload_dir_to_bucket};
 use color_eyre::{eyre::bail, owo_colors::OwoColorize};
 use std::{env::current_dir, path::PathBuf};
 

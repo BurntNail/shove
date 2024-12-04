@@ -8,6 +8,7 @@ use argon2::{
     Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
+use color_eyre::eyre::bail;
 use getrandom::getrandom;
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
 use http_body_util::Full;
@@ -21,7 +22,6 @@ use std::{
     num::NonZeroU32,
     sync::{Arc, LazyLock},
 };
-use color_eyre::eyre::bail;
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
