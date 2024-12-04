@@ -3,7 +3,6 @@ use crate::{
     s3::get_bucket,
     serve::livereload::LiveReloader,
 };
-use futures::StreamExt;
 use hyper::{body::Incoming, Request, StatusCode};
 use s3::Bucket;
 use std::{env, net::SocketAddr, sync::Arc};

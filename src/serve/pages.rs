@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::env;
 use std::sync::Arc;
 use color_eyre::eyre::bail;
 use futures::stream::FuturesUnordered;
@@ -10,8 +9,7 @@ use s3::Bucket;
 use s3::error::S3Error;
 use serde_json::from_slice;
 use tokio::sync::{Mutex, RwLock};
-use crate::protect::auth::AuthChecker;
-use crate::s3::{get_bucket, UPLOAD_DATA_LOCATION};
+use crate::s3::UPLOAD_DATA_LOCATION;
 use crate::serve::livereload::LiveReloader;
 use crate::{hash_raw_bytes, UploadData};
 
@@ -46,13 +44,13 @@ impl Pages {
             match data {
                 Ok(data) => {
                     let bytes = data.bytes();
-                    let ud = from_slice(bytes)?;
+                    let ud: UploadData = from_slice(bytes)?;
                     let hash = hash_raw_bytes(bytes);
                     (ud, hash)
                 },
-                Err(e) => match e {
-                    S3Error::HttpFailWithBody(404, _) => return Ok(None),
-                    _ => return Err(e.into()),
+                Err(e) => return match e {
+                    S3Error::HttpFailWithBody(404, _) => Ok(None),
+                    _ => Err(e.into()),
                 },
             }
         };
