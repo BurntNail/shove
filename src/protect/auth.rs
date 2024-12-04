@@ -73,12 +73,15 @@ impl AuthChecker {
         let current_enc_bytes = AuthStorer::get_encrypted_bytes(bucket).await?;
         let hashed = hash_raw_bytes(&current_enc_bytes);
 
-        if *last_hash != hashed {
-            *last_hash = hashed;
-
-            let new_version = AuthStorer::construct_from_enc_bytes(&current_enc_bytes)?;
-            *self.auth.write().await = new_version;
+        if *last_hash == hashed {
+            return Ok(());
         }
+
+        *last_hash = hashed;
+
+        let new_version = AuthStorer::construct_from_enc_bytes(&current_enc_bytes)?;
+        *self.auth.write().await = new_version;
+
         Ok(())
     }
 

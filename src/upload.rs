@@ -1,5 +1,5 @@
 use crate::{
-    s3::{get_bucket, get_upload_data},
+    s3::get_bucket,
     upload::machinery::upload_dir_to_bucket,
 };
 use color_eyre::{eyre::bail, owo_colors::OwoColorize};
