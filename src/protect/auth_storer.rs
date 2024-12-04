@@ -67,7 +67,7 @@ impl AuthStorer {
         }
     }
 
-    pub(super) fn construct_from_enc_bytes (enc_bytes: &[u8]) -> color_eyre::Result<Self> {
+    pub(super) fn construct_from_enc_bytes(enc_bytes: &[u8]) -> color_eyre::Result<Self> {
         if enc_bytes.is_empty() {
             return Ok(Self::default());
         }
@@ -79,7 +79,6 @@ impl AuthStorer {
 
         Ok(from_slice(&json)?)
     }
-
 
     pub async fn save(&self, bucket: &Bucket) -> color_eyre::Result<()> {
         let mut nonce_data = [0; 12];

@@ -3,6 +3,7 @@ use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
 use new_mime_guess::MimeGuess;
 use s3::Bucket;
+use serde_json::from_slice;
 use std::{
     collections::{HashMap, HashSet},
     fmt::Write,
@@ -18,12 +19,8 @@ struct Entry {
     mime_guess: MimeGuess,
 }
 
-pub async fn upload_dir_to_bucket(
-    dir: &str,
-    bucket: &Bucket,
-    existing: Option<UploadData>,
-) -> color_eyre::Result<()> {
-    async fn read_file(pb: PathBuf) -> color_eyre::Result<Entry> {
+pub async fn upload_dir_to_bucket(dir: &str, bucket: &Bucket) -> color_eyre::Result<()> {
+    async fn read_fs_file(pb: PathBuf) -> color_eyre::Result<Entry> {
         let Some(path) = pb.to_str().map(|x| x.to_string()) else {
             bail!("unable to get UTF-8 path")
         };
@@ -82,16 +79,24 @@ pub async fn upload_dir_to_bucket(
         Ok(())
     }
 
+    async fn get_upload_data(bucket: &Bucket) -> color_eyre::Result<Option<UploadData>> {
+        let Ok(data) = bucket.get_object(UPLOAD_DATA_LOCATION).await else {
+            return Ok(None);
+        };
+        let bytes = data.bytes();
+        Ok(from_slice(bytes)?)
+    }
+
     let UploadData {
         root: _,
         entries: existing_entries,
-    } = existing.unwrap_or_default();
+    } = get_upload_data(bucket).await?.unwrap_or_default();
 
     info!("Reading files");
     let mut futures: FuturesUnordered<_> = WalkDir::new(dir)
         .into_iter()
         .filter_map(|x| x.ok().filter(|x| x.path().is_file()))
-        .map(|item| read_file(item.path().to_path_buf()))
+        .map(|item| read_fs_file(item.path().to_path_buf()))
         .collect();
 
     let mut to_write = vec![];

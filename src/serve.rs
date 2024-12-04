@@ -1,4 +1,5 @@
 mod livereload;
+mod pages;
 mod service;
 mod state;
 

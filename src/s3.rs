@@ -1,5 +1,4 @@
-use crate::UploadData;
-use s3::{creds::Credentials, error::S3Error, Bucket, Region};
+use s3::{creds::Credentials, Bucket, Region};
 use std::env;
 
 pub const UPLOAD_DATA_LOCATION: &str = "upload_data.json";
@@ -21,15 +20,4 @@ pub fn get_aws_creds() -> Credentials {
         env::var("AWS_SECRET_ACCESS_KEY").expect("expected env var AWS_SECRET_ACCESS_KEY");
 
     Credentials::new(Some(&access_key), Some(&secret_key), None, None, None).unwrap()
-}
-
-pub async fn get_upload_data(bucket: &Bucket) -> color_eyre::Result<Option<UploadData>> {
-    let data = bucket.get_object(UPLOAD_DATA_LOCATION).await;
-    match data {
-        Ok(data) => Ok(Some(serde_json::from_slice(data.as_slice())?)),
-        Err(e) => match e {
-            S3Error::HttpFailWithBody(404, _) => Ok(None),
-            _ => Err(e.into()),
-        },
-    }
 }

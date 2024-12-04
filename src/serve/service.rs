@@ -5,7 +5,7 @@ use crate::{
 use http_body_util::Full;
 use hyper::{
     body::{Bytes, Incoming},
-    http,
+    header, http,
     service::Service,
     Method, Request, Response, StatusCode,
 };
@@ -159,8 +159,8 @@ async fn serve_get_head(
         Some((content, content_type, sc)) => {
             let builder = Response::builder()
                 .status(sc)
-                .header("Content-Type", content_type)
-                .header("Content-Length", content.len());
+                .header(header::CONTENT_TYPE, content_type)
+                .header(header::CONTENT_LENGTH, content.len());
 
             if req.method() == Method::HEAD {
                 Ok(builder.body(Full::default())?)

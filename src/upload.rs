@@ -1,7 +1,4 @@
-use crate::{
-    s3::{get_bucket, get_upload_data},
-    upload::machinery::upload_dir_to_bucket,
-};
+use crate::{s3::get_bucket, upload::machinery::upload_dir_to_bucket};
 use color_eyre::{eyre::bail, owo_colors::OwoColorize};
 use std::{env::current_dir, path::PathBuf};
 
@@ -44,8 +41,7 @@ pub async fn upload(dir: &str) -> color_eyre::Result<()> {
     info!(?dir, "Reading files");
 
     let bucket = get_bucket();
-    let current_upload_data = get_upload_data(&bucket).await?;
-    upload_dir_to_bucket(dir, &bucket, current_upload_data).await?;
+    upload_dir_to_bucket(dir, &bucket).await?;
 
     Ok(())
 }
