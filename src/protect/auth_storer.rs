@@ -53,14 +53,14 @@ pub struct AuthStorer {
 #[derive(Serialize, Deserialize)]
 struct StoredAuthStorer {
     pub realms: Vec<(Realm, Vec<Uuid>)>,
-    pub users: Vec<(Uuid, UsernameAndPassword)>
+    pub users: Vec<(Uuid, UsernameAndPassword)>,
 }
 
 impl From<StoredAuthStorer> for AuthStorer {
     fn from(value: StoredAuthStorer) -> Self {
         Self {
-            realms: HashMap::from_iter(value.realms.into_iter()),
-            users: HashMap::from_iter(value.users.into_iter())
+            realms: HashMap::from_iter(value.realms),
+            users: HashMap::from_iter(value.users),
         }
     }
 }
