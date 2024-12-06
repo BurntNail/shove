@@ -151,7 +151,7 @@ impl AuthChecker {
         let failed_auth_rsp = Response::builder()
             .header(
                 "WWW-Authenticate",
-                format!("Basic realm={path:?} charset=\"UTF-8\""),
+                format!("Basic realm=\"{path:?}\" charset=\"UTF-8\""),
             )
             .status(StatusCode::UNAUTHORIZED)
             .body(Full::default())
