@@ -44,10 +44,33 @@ struct UsernameAndPassword {
     pub stored_key: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct AuthStorer {
     realms: HashMap<Realm, Vec<Uuid>>,
     users: HashMap<Uuid, UsernameAndPassword>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StoredAuthStorer {
+    pub realms: Vec<(Realm, Vec<Uuid>)>,
+    pub users: Vec<(Uuid, UsernameAndPassword)>
+}
+
+impl From<StoredAuthStorer> for AuthStorer {
+    fn from(value: StoredAuthStorer) -> Self {
+        Self {
+            realms: HashMap::from_iter(value.realms.into_iter()),
+            users: HashMap::from_iter(value.users.into_iter())
+        }
+    }
+}
+impl From<AuthStorer> for StoredAuthStorer {
+    fn from(value: AuthStorer) -> Self {
+        Self {
+            realms: value.realms.into_iter().collect(),
+            users: value.users.into_iter().collect(),
+        }
+    }
 }
 
 impl AuthStorer {
@@ -77,7 +100,9 @@ impl AuthStorer {
         let cipher = Aes256Gcm::new(&*AUTH_KEY);
         let json = cipher.decrypt(nonce, ciphered_data)?;
 
-        Ok(from_slice(&json)?)
+        let stored: StoredAuthStorer = from_slice(&json)?;
+
+        Ok(stored.into())
     }
 
     pub async fn save(&self, bucket: &Bucket) -> color_eyre::Result<()> {
@@ -85,7 +110,8 @@ impl AuthStorer {
         getrandom(&mut nonce_data)?;
         let nonce = Nonce::<Aes256Gcm>::from_slice(&nonce_data);
 
-        let json = to_vec(&self)?;
+        let stored: StoredAuthStorer = self.clone().into();
+        let json = to_vec(&stored)?;
 
         let cipher = Aes256Gcm::new(&*AUTH_KEY);
         let ciphered_data = cipher.encrypt(nonce, json.as_slice())?;
