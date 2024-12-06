@@ -148,6 +148,15 @@ impl AuthChecker {
             hashed.serialize().to_string()
         });
 
+        let failed_auth_rsp = Response::builder()
+            .header(
+                "WWW-Authenticate",
+                format!("Basic realm={path:?} charset=\"UTF-8\""),
+            )
+            .status(StatusCode::UNAUTHORIZED)
+            .body(Full::default())
+            .into();
+
         let Some(users) = self.auth.read().await.find_users_with_access(path) else {
             return AuthReturn::AuthConfirmed(req);
         };
@@ -164,23 +173,16 @@ impl AuthChecker {
                     Some(x) => x.to_string(),
                     None => {
                         debug!("Unable to find Basic part");
-                        return empty_with_code(StatusCode::UNAUTHORIZED).into();
+                        return failed_auth_rsp;
                     }
                 },
                 Err(e) => {
                     debug!(?e, "Error converting auth part to string");
-                    return empty_with_code(StatusCode::BAD_REQUEST).into();
+                    return failed_auth_rsp;
                 }
             },
             None => {
-                return Response::builder()
-                    .header(
-                        "WWW-Authenticate",
-                        format!("Basic realm={path:?} charset=\"UTF-8\""),
-                    )
-                    .status(StatusCode::UNAUTHORIZED)
-                    .body(Full::default())
-                    .into();
+                return failed_auth_rsp;
             }
         };
 
@@ -217,7 +219,7 @@ impl AuthChecker {
             };
             let _ = Argon2::default()
                 .verify_password(provided_password.as_bytes(), &fake_password_hash);
-            return empty_with_code(StatusCode::UNAUTHORIZED).into();
+            return failed_auth_rsp;
         };
 
         let password_hash = match PasswordHash::new(stored_key) {
@@ -242,7 +244,7 @@ impl AuthChecker {
             AuthReturn::AuthConfirmed(req)
         } else {
             debug!("Passwords didn't match for auth");
-            empty_with_code(StatusCode::UNAUTHORIZED).into()
+            failed_auth_rsp
         }
     }
 }
