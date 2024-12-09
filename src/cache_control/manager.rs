@@ -1,18 +1,14 @@
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use std::sync::{Arc};
-use tokio::sync::RwLock;
+use crate::{hash_raw_bytes, non_empty_list::NonEmptyList, s3::get_bytes_or_default, Realm};
+use color_eyre::eyre::bail;
+use dialoguer::{theme::Theme, FuzzySelect, Input};
 use s3::Bucket;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
-use crate::{hash_raw_bytes, Realm};
-use std::fmt::Write;
-use color_eyre::eyre::bail;
-use dialoguer::{FuzzySelect, Input};
-use dialoguer::theme::Theme;
-use crate::non_empty_list::NonEmptyList;
-use crate::s3::get_bytes_or_default;
-
+use std::{
+    collections::HashMap,
+    fmt::{Display, Formatter, Write},
+    sync::Arc,
+};
+use tokio::sync::{Mutex, RwLock};
 
 const CC_LOCATION: &str = "cache_control.json";
 
@@ -32,7 +28,7 @@ impl Display for Directive {
             Directive::NoCache => write!(f, "no-cache"),
             Directive::MustRevalidate => write!(f, "must-revalidate"),
             Directive::NoStore => write!(f, "no-store"),
-            Directive::StaleWhileRevalidate => write!(f, "stale-while-revalidate")
+            Directive::StaleWhileRevalidate => write!(f, "stale-while-revalidate"),
         }
     }
 }
@@ -63,7 +59,7 @@ impl Directive {
         Some(output)
     }
 
-    pub fn get_from_stdin (theme: &dyn Theme) -> color_eyre::Result<Self> {
+    pub fn get_from_stdin(theme: &dyn Theme) -> color_eyre::Result<Self> {
         let choice = FuzzySelect::with_theme(theme)
             .with_prompt("Which directive?")
             .items(&[
@@ -71,19 +67,22 @@ impl Directive {
                 "No Cache",
                 "Must Revalidate",
                 "No Store",
-                "Stale While Revalidate"
-            ]).interact()?;
+                "Stale While Revalidate",
+            ])
+            .interact()?;
 
         Ok(match choice {
             0 => {
-                let max_age = Input::with_theme(theme).with_prompt("What should the max age (seconds) be?").interact()?;
+                let max_age = Input::with_theme(theme)
+                    .with_prompt("What should the max age (seconds) be?")
+                    .interact()?;
                 Self::MaxAge(max_age)
-            },
+            }
             1 => Self::NoCache,
             2 => Self::MustRevalidate,
             3 => Self::NoStore,
             4 => Self::StaleWhileRevalidate,
-            _ => unreachable!()
+            _ => unreachable!(),
         })
     }
 }
@@ -95,17 +94,17 @@ pub struct CacheControlManager {
 }
 
 impl CacheControlManager {
-    pub async fn new (bucket: &Bucket) -> color_eyre::Result<Self> {
+    pub async fn new(bucket: &Bucket) -> color_eyre::Result<Self> {
         let (caching, raw_bytes) = Caching::new(bucket).await?;
         let hashed_bytes = hash_raw_bytes(&raw_bytes);
 
         Ok(Self {
             last_hash: Arc::new(Mutex::new(hashed_bytes)),
-            current: Arc::new(RwLock::new(caching))
+            current: Arc::new(RwLock::new(caching)),
         })
     }
 
-    pub async fn reload (&self, bucket: &Bucket) -> color_eyre::Result<()> {
+    pub async fn reload(&self, bucket: &Bucket) -> color_eyre::Result<()> {
         let Ok(mut last_hash) = self.last_hash.try_lock() else {
             bail!("already reloading cache control")
         };
@@ -128,7 +127,7 @@ impl CacheControlManager {
         Ok(())
     }
 
-    pub async fn get_directives (&self, path: &str) -> Vec<Directive> {
+    pub async fn get_directives(&self, path: &str) -> Vec<Directive> {
         self.current.read().await.get_cache_control_directives(path)
     }
 }
@@ -136,20 +135,24 @@ impl CacheControlManager {
 #[derive(Debug, Clone, Default)]
 pub struct Caching {
     pub default: Option<NonEmptyList<Directive>>,
-    overrides: HashMap<Realm, NonEmptyList<Directive>>
+    overrides: HashMap<Realm, NonEmptyList<Directive>>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct StoredCaching {
     default: Vec<Directive>,
-    overrides: Vec<(Realm, Vec<Directive>)>
+    overrides: Vec<(Realm, Vec<Directive>)>,
 }
 
 impl From<Caching> for StoredCaching {
     fn from(value: Caching) -> Self {
         Self {
             default: value.default.map(|x| x.into()).unwrap_or_default(),
-            overrides: value.overrides.into_iter().map(|(r, l)| (r, l.into())).collect()
+            overrides: value
+                .overrides
+                .into_iter()
+                .map(|(r, l)| (r, l.into()))
+                .collect(),
         }
     }
 }
@@ -157,35 +160,39 @@ impl From<StoredCaching> for Caching {
     fn from(value: StoredCaching) -> Self {
         Self {
             default: NonEmptyList::new(value.default),
-            overrides: value.overrides.into_iter().flat_map(|(realm, dirs)| {
-                NonEmptyList::new(dirs).map(|nel| (realm, nel))
-            }).collect()
+            overrides: value
+                .overrides
+                .into_iter()
+                .flat_map(|(realm, dirs)| NonEmptyList::new(dirs).map(|nel| (realm, nel)))
+                .collect(),
         }
     }
 }
 
 impl Caching {
-    pub async fn new (bucket: &Bucket) -> color_eyre::Result<(Self, Vec<u8>)> {
+    pub async fn new(bucket: &Bucket) -> color_eyre::Result<(Self, Vec<u8>)> {
         let bytes = Self::get_raw_bytes(bucket).await?;
         let s = Self::construct_from_bytes(&bytes)?;
         Ok((s, bytes))
     }
 
-    pub async fn save (&self, bucket: &Bucket) -> color_eyre::Result<()> {
+    pub async fn save(&self, bucket: &Bucket) -> color_eyre::Result<()> {
         let stored: StoredCaching = self.clone().into(); //can't do ref stuff because we have to do in-memory stuff for the hashmap :(
         let bytes = serde_json::to_vec(&stored)?;
 
-        bucket.put_object_with_content_type(CC_LOCATION, &bytes, "application/json").await?;
+        bucket
+            .put_object_with_content_type(CC_LOCATION, &bytes, "application/json")
+            .await?;
 
         Ok(())
     }
 
-    async fn get_raw_bytes (bucket: &Bucket) -> color_eyre::Result<Vec<u8>> {
+    async fn get_raw_bytes(bucket: &Bucket) -> color_eyre::Result<Vec<u8>> {
         get_bytes_or_default(bucket, CC_LOCATION).await
     }
 
     //not very necessary rn, but good for API footprint stuff later
-    fn construct_from_bytes (bytes: &[u8]) -> color_eyre::Result<Self> {
+    fn construct_from_bytes(bytes: &[u8]) -> color_eyre::Result<Self> {
         if bytes.is_empty() {
             return Ok(Self::default());
         }
@@ -193,8 +200,10 @@ impl Caching {
         Ok(stored.into())
     }
 
-    pub fn get_cache_control_directives (&self, path: &str) -> Vec<Directive> {
-        let mut from_map: Vec<Directive> = self.overrides.iter()
+    pub fn get_cache_control_directives(&self, path: &str) -> Vec<Directive> {
+        let mut from_map: Vec<Directive> = self
+            .overrides
+            .iter()
             .filter(|(realm, _)| realm.matches(path))
             .flat_map(|(_, dirs)| dirs.clone())
             .collect();
@@ -208,11 +217,11 @@ impl Caching {
         from_map
     }
 
-    pub fn get_all_caching_rules (&self) -> HashMap<Realm, NonEmptyList<Directive>> {
+    pub fn get_all_caching_rules(&self) -> HashMap<Realm, NonEmptyList<Directive>> {
         self.overrides.clone()
     }
 
-    pub fn set_directives (&mut self, realm: Realm, directives: NonEmptyList<Directive>) {
+    pub fn set_directives(&mut self, realm: Realm, directives: NonEmptyList<Directive>) {
         self.overrides.insert(realm, directives);
     }
 }

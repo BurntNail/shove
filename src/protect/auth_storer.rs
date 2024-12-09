@@ -1,4 +1,4 @@
-use crate::protect::auth::AUTH_DATA_LOCATION;
+use crate::{protect::auth::AUTH_DATA_LOCATION, s3::get_bytes_or_default, Realm};
 use aes_gcm::{
     aead::{Aead, Nonce},
     Aes256Gcm, Key, KeyInit,
@@ -12,8 +12,6 @@ use serde_json::{from_slice, to_vec};
 use sha2::Sha256;
 use std::{collections::HashMap, env::var, sync::LazyLock};
 use uuid::Uuid;
-use crate::Realm;
-use crate::s3::get_bytes_or_default;
 
 static AUTH_KEY: LazyLock<Key<Aes256Gcm>> = LazyLock::new(|| {
     let password = var("AUTH_ENCRYPTION_KEY").expect("unable to find env var AUTH_ENCRYPTION_KEY");
@@ -27,8 +25,6 @@ static AUTH_KEY: LazyLock<Key<Aes256Gcm>> = LazyLock::new(|| {
     Key::<Aes256Gcm>::from_slice(&key_output).to_owned()
 });
 
-
-
 #[derive(Serialize, Deserialize, Clone)]
 struct UsernameAndPassword {
     pub username: String,
@@ -37,7 +33,7 @@ struct UsernameAndPassword {
 
 #[derive(Clone, Default)]
 pub struct AuthStorer {
-    realms: HashMap<Realm, Vec<Uuid>>,
+    realms: HashMap<Realm, Vec<Uuid>>, //TODO: NonEmptyList?
     users: HashMap<Uuid, UsernameAndPassword>,
 }
 
@@ -179,7 +175,7 @@ impl AuthStorer {
     }
 
     pub fn protect(&mut self, pattern: Realm, uuids: Vec<Uuid>) {
-        *self.realms.entry(pattern).or_default() = uuids;
+        self.realms.insert(pattern, uuids);
     }
 
     pub fn protect_additional(&mut self, pattern: Realm, uuids: Vec<Uuid>) {

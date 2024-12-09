@@ -1,11 +1,10 @@
-use crate::{protect::protect, serve::serve, upload::upload};
+use crate::{cache_control::cache, protect::protect, serve::serve, upload::upload};
 use color_eyre::owo_colors::OwoColorize;
 use dotenvy::var;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, env::args};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-use crate::cache_control::cache;
 
 pub fn hash_raw_bytes(bytes: impl AsRef<[u8]>) -> Vec<u8> {
     let mut hasher = Sha256::new();
@@ -13,12 +12,12 @@ pub fn hash_raw_bytes(bytes: impl AsRef<[u8]>) -> Vec<u8> {
     hasher.finalize().to_vec()
 }
 
+pub mod cache_control;
+mod non_empty_list;
 pub mod protect;
 pub mod s3;
 pub mod serve;
 mod upload;
-pub mod cache_control;
-mod non_empty_list;
 
 #[macro_use]
 extern crate tracing;
@@ -159,9 +158,7 @@ impl Args {
         eprintln!("  eg. `{}`", "shove protect".cyan());
         eprintln!();
         eprintln!("`{}` command", "cache".italic());
-        eprintln!(
-            "  Modifies the cache control headers on files",
-        );
+        eprintln!("  Modifies the cache control headers on files",);
         eprintln!("  eg. `{}`", "shove cache".cyan());
         eprintln!();
         eprintln!("{}", "Environment Variables".underline());
@@ -245,12 +242,10 @@ fn main() {
                 }
             });
         }
-        Args::Cache => {
-            runtime.block_on(async move {
-                if let Err(e) = cache().await {
-                    error!(?e, "Error caching");
-                }
-            })
-        }
+        Args::Cache => runtime.block_on(async move {
+            if let Err(e) = cache().await {
+                error!(?e, "Error caching");
+            }
+        }),
     }
 }

@@ -1,37 +1,38 @@
-use std::alloc::{alloc, dealloc, realloc, Layout};
-use std::fmt::{Debug, Formatter};
-use std::marker::PhantomData;
-use std::num::NonZeroUsize;
-use std::ptr::NonNull;
-use std::{ptr, slice, vec};
-use std::mem::ManuallyDrop;
+use std::{
+    alloc::{alloc, dealloc, realloc, Layout},
+    fmt::{Debug, Formatter},
+    marker::PhantomData,
+    mem::ManuallyDrop,
+    num::NonZeroUsize,
+    ptr,
+    ptr::NonNull,
+    slice, vec,
+};
 
 ///list that cannot be empty, and is push-only
 pub struct NonEmptyList<T> {
     len: NonZeroUsize,
     cap: NonZeroUsize,
     ptr: NonNull<T>,
-    _pd: PhantomData<T>
+    _pd: PhantomData<T>,
 }
 
 unsafe impl<T> Send for NonEmptyList<T> {}
 unsafe impl<T> Sync for NonEmptyList<T> {}
 
 impl<T> NonEmptyList<T> {
-    pub fn new (list: Vec<T>) -> Option<Self> {
+    pub fn new(list: Vec<T>) -> Option<Self> {
         if list.is_empty() {
             None
         } else {
             //safety: just checked :)
-            Some(unsafe {
-                Self::from_non_empty_vec(list)
-            })
+            Some(unsafe { Self::from_non_empty_vec(list) })
         }
     }
 
     ///# Safety
     /// Passed in list must not be empty.
-    pub unsafe fn from_non_empty_vec (list: Vec<T>) -> Self {
+    pub unsafe fn from_non_empty_vec(list: Vec<T>) -> Self {
         debug_assert!(!list.is_empty());
 
         let mut list = ManuallyDrop::new(list);
@@ -41,11 +42,14 @@ impl<T> NonEmptyList<T> {
         let ptr = NonNull::new_unchecked(list.as_mut_ptr());
 
         Self {
-            len, cap, ptr, _pd: PhantomData
+            len,
+            cap,
+            ptr,
+            _pd: PhantomData,
         }
     }
 
-    fn grow_at_least (&mut self, extra: usize) {
+    fn grow_at_least(&mut self, extra: usize) {
         let old_layout = Layout::array::<T>(self.cap.get()).unwrap(); //we allocated with it once lol
 
         let fails_constraints = |cap: NonZeroUsize| -> bool {
@@ -59,23 +63,34 @@ impl<T> NonEmptyList<T> {
             }
         };
 
-        let min_cap = self.cap.checked_add(extra).expect("unable to create large enough list for NonEmptyList");
+        let min_cap = self
+            .cap
+            .checked_add(extra)
+            .expect("unable to create large enough list for NonEmptyList");
         if fails_constraints(min_cap) {
             panic!("New list is too large to be a proper vec");
         }
 
-        let new_cap = min_cap.checked_next_power_of_two().filter(|x| !fails_constraints(*x)).unwrap_or(min_cap);
+        let new_cap = min_cap
+            .checked_next_power_of_two()
+            .filter(|x| !fails_constraints(*x))
+            .unwrap_or(min_cap);
 
         //new_size is in bytes, so have to multiply by size_of T
         let new_ptr = NonNull::new(unsafe {
-            realloc(self.ptr.as_ptr() as *mut u8, old_layout, new_cap.get() * size_of::<T>()) as *mut T
-        }).expect("reallocation of new empty list failed");
+            realloc(
+                self.ptr.as_ptr() as *mut u8,
+                old_layout,
+                new_cap.get() * size_of::<T>(),
+            ) as *mut T
+        })
+        .expect("reallocation of new empty list failed");
 
         self.ptr = new_ptr;
         self.cap = new_cap;
     }
 
-    pub fn push (&mut self, el: T) {
+    pub fn push(&mut self, el: T) {
         if self.len >= self.cap {
             self.grow_at_least(1);
         }
@@ -90,7 +105,7 @@ impl<T> NonEmptyList<T> {
         }
     }
 
-    pub fn extend (&mut self, iter: impl IntoIterator<Item = T>) {
+    pub fn extend(&mut self, iter: impl IntoIterator<Item = T>) {
         let iter = iter.into_iter();
 
         let (min, max) = iter.size_hint();
@@ -118,9 +133,7 @@ impl<T> NonEmptyList<T> {
 impl<T> From<NonEmptyList<T>> for Vec<T> {
     fn from(value: NonEmptyList<T>) -> Self {
         let md = ManuallyDrop::new(value);
-        unsafe {
-            Vec::from_raw_parts(md.ptr.as_ptr(), md.len.get(), md.cap.get())
-        }
+        unsafe { Vec::from_raw_parts(md.ptr.as_ptr(), md.len.get(), md.cap.get()) }
     }
 }
 
@@ -128,9 +141,13 @@ impl<T> Drop for NonEmptyList<T> {
     fn drop(&mut self) {
         unsafe {
             //drop all individual elements
-            ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.ptr.as_ptr(), self.len.get()));
+            ptr::drop_in_place(ptr::slice_from_raw_parts_mut(
+                self.ptr.as_ptr(),
+                self.len.get(),
+            ));
 
-            let layout = Layout::array::<T>(self.cap.get()).expect("used this alloc to get the allocation");
+            let layout =
+                Layout::array::<T>(self.cap.get()).expect("used this alloc to get the allocation");
             dealloc(self.ptr.as_ptr() as *mut u8, layout);
         }
     }
@@ -138,22 +155,19 @@ impl<T> Drop for NonEmptyList<T> {
 
 impl<T> AsRef<[T]> for NonEmptyList<T> {
     fn as_ref(&self) -> &[T] {
-        unsafe {
-            slice::from_raw_parts(self.ptr.as_ptr() as *const _, self.len.get())
-        }
+        unsafe { slice::from_raw_parts(self.ptr.as_ptr() as *const _, self.len.get()) }
     }
 }
 impl<T> AsMut<[T]> for NonEmptyList<T> {
     fn as_mut(&mut self) -> &mut [T] {
-        unsafe {
-            slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len.get())
-        }
+        unsafe { slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len.get()) }
     }
 }
 
 impl<T: Clone> Clone for NonEmptyList<T> {
     fn clone(&self) -> Self {
-        let layout = Layout::array::<T>(self.cap.get()).expect("unable to create layout for cloning NonEmptyList");
+        let layout = Layout::array::<T>(self.cap.get())
+            .expect("unable to create layout for cloning NonEmptyList");
         let ptr = unsafe {
             NonNull::new(alloc(layout) as *mut T).expect("unable to allocate for new NonEmptyList")
         };
@@ -166,14 +180,13 @@ impl<T: Clone> Clone for NonEmptyList<T> {
                 let this_idx = self.ptr.add(i).as_ref();
                 ptr.add(i).write(this_idx.clone());
             }
-
         }
 
         Self {
             ptr,
             len: self.len,
             cap: self.cap,
-            _pd: PhantomData
+            _pd: PhantomData,
         }
     }
 }

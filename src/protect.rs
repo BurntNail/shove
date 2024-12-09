@@ -1,4 +1,4 @@
-use crate::{protect::auth_storer::{AuthStorer}, s3::get_bucket, Realm};
+use crate::{protect::auth_storer::AuthStorer, s3::get_bucket, Realm};
 use comfy_table::Table;
 use dialoguer::{theme::ColorfulTheme, Confirm, FuzzySelect, Input, MultiSelect, Password, Select};
 

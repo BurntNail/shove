@@ -1,13 +1,15 @@
 use crate::{
+    cache_control::manager::CacheControlManager,
     protect::auth::{AuthChecker, AuthReturn},
     s3::get_bucket,
-    serve::{livereload::LiveReloader, pages::Pages},
+    serve::{
+        livereload::LiveReloader,
+        pages::{PageOutput, Pages},
+    },
 };
 use hyper::{body::Incoming, Request};
 use s3::Bucket;
 use std::{env, net::SocketAddr, sync::Arc};
-use crate::cache_control::manager::CacheControlManager;
-use crate::serve::pages::PageOutput;
 
 #[derive(Clone)]
 pub struct State {
@@ -16,7 +18,7 @@ pub struct State {
     pages: Pages,
     live_reloader: LiveReloader,
     auth: AuthChecker,
-    cache_control_manager: CacheControlManager
+    cache_control_manager: CacheControlManager,
 }
 
 impl State {
@@ -45,7 +47,7 @@ impl State {
             tigris_token,
             live_reloader,
             auth,
-            cache_control_manager
+            cache_control_manager,
         }))
     }
 
@@ -76,7 +78,9 @@ impl State {
 
     #[instrument(skip(self))]
     pub async fn get(&self, path: &str) -> Option<PageOutput> {
-        self.pages.get(&self.bucket, path, &self.cache_control_manager).await
+        self.pages
+            .get(&self.bucket, path, &self.cache_control_manager)
+            .await
     }
 
     pub async fn check_auth(

@@ -1,4 +1,7 @@
-use crate::{hash_raw_bytes, protect::auth_storer::{AuthStorer}, serve::empty_with_code, Realm};
+use crate::{
+    hash_raw_bytes, protect::auth_storer::AuthStorer, s3::get_bytes_or_default,
+    serve::empty_with_code, Realm,
+};
 use argon2::{
     password_hash::{Error, SaltString},
     Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
@@ -20,7 +23,6 @@ use std::{
 };
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
-use crate::s3::get_bytes_or_default;
 
 pub const AUTH_DATA_LOCATION: &str = "authdata";
 
