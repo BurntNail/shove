@@ -327,7 +327,7 @@ mod tests {
         let large_iter = (2..1_000_000).collect::<Vec<_>>();
         list.extend(large_iter);
 
-        assert_eq!(list.len.get(), 10_000 - 1);
+        assert_eq!(list.len.get(), 1_000_000 - 1);
         assert_eq!(list.as_ref()[0], 1);
         assert_eq!(list.as_ref()[1], 2);
     }
