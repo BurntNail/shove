@@ -6,12 +6,14 @@ use aes_gcm::{
 use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
 use getrandom::getrandom;
 use hkdf::Hkdf;
-use s3::{error::S3Error, Bucket};
+use s3::Bucket;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_slice, to_vec};
 use sha2::Sha256;
 use std::{collections::HashMap, env::var, sync::LazyLock};
 use uuid::Uuid;
+use crate::Realm;
+use crate::s3::get_bytes_or_default;
 
 static AUTH_KEY: LazyLock<Key<Aes256Gcm>> = LazyLock::new(|| {
     let password = var("AUTH_ENCRYPTION_KEY").expect("unable to find env var AUTH_ENCRYPTION_KEY");
@@ -25,18 +27,7 @@ static AUTH_KEY: LazyLock<Key<Aes256Gcm>> = LazyLock::new(|| {
     Key::<Aes256Gcm>::from_slice(&key_output).to_owned()
 });
 
-#[derive(Serialize, Deserialize, Clone, Hash, Eq, PartialEq, Debug)]
-pub enum Realm {
-    StartsWith(String),
-}
 
-impl Realm {
-    pub fn matches(&self, path: &str) -> bool {
-        match self {
-            Self::StartsWith(pattern) => path.starts_with(pattern),
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize, Clone)]
 struct UsernameAndPassword {
@@ -76,18 +67,10 @@ impl From<AuthStorer> for StoredAuthStorer {
 impl AuthStorer {
     ///returns raw bytes from S3 as well
     pub async fn new(bucket: &Bucket) -> color_eyre::Result<(Self, Vec<u8>)> {
-        let enc_bytes = Self::get_encrypted_bytes(bucket).await?;
+        let enc_bytes = get_bytes_or_default(bucket, AUTH_DATA_LOCATION).await?;
         let obj = Self::construct_from_enc_bytes(&enc_bytes)?;
 
         Ok((obj, enc_bytes))
-    }
-
-    pub(super) async fn get_encrypted_bytes(bucket: &Bucket) -> color_eyre::Result<Vec<u8>> {
-        match bucket.get_object(AUTH_DATA_LOCATION).await {
-            Ok(x) => Ok(x.to_vec()),
-            Err(S3Error::HttpFailWithBody(404, _)) => Ok(vec![]),
-            Err(e) => Err(e.into()),
-        }
     }
 
     pub(super) fn construct_from_enc_bytes(enc_bytes: &[u8]) -> color_eyre::Result<Self> {

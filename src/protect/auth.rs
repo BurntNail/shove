@@ -1,8 +1,4 @@
-use crate::{
-    hash_raw_bytes,
-    protect::auth_storer::{AuthStorer, Realm},
-    serve::empty_with_code,
-};
+use crate::{hash_raw_bytes, protect::auth_storer::{AuthStorer}, serve::empty_with_code, Realm};
 use argon2::{
     password_hash::{Error, SaltString},
     Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
@@ -24,6 +20,7 @@ use std::{
 };
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
+use crate::s3::get_bytes_or_default;
 
 pub const AUTH_DATA_LOCATION: &str = "authdata";
 
@@ -70,7 +67,7 @@ impl AuthChecker {
             bail!("already reloading auth")
         };
 
-        let current_enc_bytes = AuthStorer::get_encrypted_bytes(bucket).await?;
+        let current_enc_bytes = get_bytes_or_default(bucket, AUTH_DATA_LOCATION).await?;
         let hashed = hash_raw_bytes(&current_enc_bytes);
 
         if *last_hash == hashed {

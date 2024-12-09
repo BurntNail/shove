@@ -1,5 +1,6 @@
 use s3::{creds::Credentials, Bucket, Region};
 use std::env;
+use s3::error::S3Error;
 
 pub const UPLOAD_DATA_LOCATION: &str = "upload_data.json";
 
@@ -20,4 +21,13 @@ pub fn get_aws_creds() -> Credentials {
         env::var("AWS_SECRET_ACCESS_KEY").expect("expected env var AWS_SECRET_ACCESS_KEY");
 
     Credentials::new(Some(&access_key), Some(&secret_key), None, None, None).unwrap()
+}
+
+///if the file doesn't exist, get the default Vec<u8>
+pub async fn get_bytes_or_default (bucket: &Bucket, location: impl AsRef<str>) -> color_eyre::Result<Vec<u8>> {
+    match bucket.get_object(location.as_ref()).await {
+        Ok(x) => Ok(x.to_vec()),
+        Err(S3Error::HttpFailWithBody(404, _)) => Ok(vec![]),
+        Err(e) => Err(e.into()),
+    }
 }

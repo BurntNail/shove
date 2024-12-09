@@ -16,9 +16,23 @@ pub mod protect;
 pub mod s3;
 pub mod serve;
 mod upload;
+pub mod cache_control;
 
 #[macro_use]
 extern crate tracing;
+
+#[derive(Serialize, Deserialize, Clone, Hash, Eq, PartialEq, Debug)]
+pub enum Realm {
+    StartsWith(String),
+}
+
+impl Realm {
+    pub fn matches(&self, path: &str) -> bool {
+        match self {
+            Self::StartsWith(pattern) => path.starts_with(pattern),
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, Eq, PartialEq)]
 pub struct UploadData {
