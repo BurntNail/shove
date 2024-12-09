@@ -8,6 +8,7 @@ use std::{
     ptr::{self, copy, NonNull},
     slice, vec,
 };
+use std::ops::{Index, IndexMut};
 
 ///list that cannot be empty, and is push-only
 pub struct NonEmptyList<T> {
@@ -279,6 +280,32 @@ impl<T> IntoIterator for NonEmptyList<T> {
     fn into_iter(self) -> Self::IntoIter {
         let v: Vec<T> = self.into();
         v.into_iter()
+    }
+}
+
+impl<T> Index<usize> for NonEmptyList<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        if index >= self.len() {
+            panic!("attempted index out of bounds");
+        }
+
+        unsafe {
+            self.ptr.add(index).as_ref()
+        }
+    }
+}
+
+impl<T> IndexMut<usize> for NonEmptyList<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        if index >= self.len() {
+            panic!("attempted index out of bounds");
+        }
+
+        unsafe {
+            self.ptr.add(index).as_mut()
+        }
     }
 }
 
@@ -660,5 +687,82 @@ mod tests {
 
         list.push(5);
         assert_eq!(list.as_ref(), &[1, 4, 3, 5]);
+    }
+
+    #[test]
+    fn test_index_access() {
+        let vec = vec![10, 20, 30];
+        let list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        assert_eq!(list[0], 10);
+        assert_eq!(list[1], 20);
+        assert_eq!(list[2], 30);
+    }
+
+    #[test]
+    fn test_index_mut_access() {
+        let vec = vec![1, 2, 3];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        list[1] = 42; // Modify the second element
+        assert_eq!(list.as_ref(), &[1, 42, 3]);
+    }
+
+    #[test]
+    #[should_panic(expected = "attempted index out of bounds")]
+    fn test_index_out_of_bounds() {
+        let vec = vec![1, 2, 3];
+        let list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        let _ = list[3]; // Attempt to access out-of-bounds index
+    }
+
+    #[test]
+    #[should_panic(expected = "attempted index out of bounds")]
+    fn test_index_mut_out_of_bounds() {
+        let vec = vec![1, 2, 3];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        list[3] = 42; // Attempt to modify out-of-bounds index
+    }
+
+    #[test]
+    fn test_index_with_large_list() {
+        let vec = (0..10_000).collect::<Vec<_>>();
+        let list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        assert_eq!(list[9999], 9999); // Access last element
+        assert_eq!(list[5000], 5000); // Access a middle element
+    }
+
+    #[test]
+    fn test_index_mut_with_large_list() {
+        let vec = (0..10_000).collect::<Vec<_>>();
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        list[9999] = 42; // Modify last element
+        list[5000] = 84; // Modify a middle element
+
+        assert_eq!(list[9999], 42);
+        assert_eq!(list[5000], 84);
+    }
+
+    #[test]
+    fn test_index_access_chained() {
+        let vec = vec![10, 20, 30];
+        let list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        assert_eq!(list[0] + list[1], 30); // Add elements at indices 0 and 1
+    }
+
+    #[test]
+    fn test_index_mut_with_reassignment() {
+        let vec = vec![1, 2, 3];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        let elem = &mut list[1];
+        *elem += 10; // Modify element in-place
+
+        assert_eq!(list.as_ref(), &[1, 12, 3]);
     }
 }
