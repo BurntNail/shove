@@ -4,8 +4,8 @@ use std::{
     marker::PhantomData,
     mem::ManuallyDrop,
     num::NonZeroUsize,
-    ptr,
-    ptr::NonNull,
+    ops::{Deref, DerefMut},
+    ptr::{self, copy, NonNull},
     slice, vec,
 };
 
@@ -105,6 +105,67 @@ impl<T> NonEmptyList<T> {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.len.get()
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.cap.get()
+    }
+
+    pub fn remove(&mut self, index: usize) -> T {
+        let current_len = self.len.get();
+        if index >= current_len {
+            panic!("tried to remove index out of bounds");
+        }
+        if current_len <= 1 {
+            panic!("attempted remove which would make the list empty");
+        }
+
+        let currently_at_that_position = unsafe { self.ptr.add(index).read() };
+
+        {
+            let src = unsafe { self.ptr.add(index + 1) }.as_ptr();
+            let dst = unsafe { self.ptr.add(index) }.as_ptr();
+            let count = current_len - index - 1;
+
+            if count > 0 {
+                unsafe {
+                    copy(src, dst, count);
+                }
+            }
+        }
+
+        self.len = NonZeroUsize::try_from(current_len - 1).unwrap();
+
+        currently_at_that_position
+    }
+
+    pub fn swap_remove(&mut self, index: usize) -> T {
+        let current_len = self.len.get();
+        if index >= current_len {
+            panic!("tried to remove index out of bounds");
+        }
+        if current_len <= 1 {
+            panic!("attempted remove which would make the list empty");
+        }
+
+        let currently_at_that_position = unsafe { self.ptr.add(index).read() };
+
+        {
+            let src = unsafe { self.ptr.add(current_len - 1) }.as_ptr();
+            let dst = unsafe { self.ptr.add(index) }.as_ptr();
+
+            unsafe {
+                copy(src, dst, 1);
+            }
+        }
+
+        self.len = NonZeroUsize::try_from(current_len - 1).unwrap();
+
+        currently_at_that_position
+    }
+
     pub fn extend(&mut self, iter: impl IntoIterator<Item = T>) {
         let iter = iter.into_iter();
 
@@ -127,6 +188,14 @@ impl<T> NonEmptyList<T> {
                 self.len = self.len.checked_add(1).unwrap_unchecked();
             }
         }
+    }
+
+    pub fn iter(&self) -> slice::Iter<T> {
+        self.as_ref().iter()
+    }
+
+    pub fn iter_mut(&mut self) -> slice::IterMut<T> {
+        self.as_mut().iter_mut()
     }
 }
 
@@ -213,6 +282,7 @@ impl<T> IntoIterator for NonEmptyList<T> {
     }
 }
 
+#[derive(Default, Clone, Debug)]
 pub struct NonEmptyListBuilder<T>(Vec<T>);
 
 impl<T> TryFrom<NonEmptyListBuilder<T>> for NonEmptyList<T> {
@@ -227,6 +297,30 @@ impl<T> TryFrom<NonEmptyListBuilder<T>> for NonEmptyList<T> {
                 Ok(NonEmptyList::from_non_empty_vec(value.0))
             }
         }
+    }
+}
+
+impl<T> Deref for NonEmptyListBuilder<T> {
+    type Target = Vec<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl<T> DerefMut for NonEmptyListBuilder<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<T> AsRef<[T]> for NonEmptyListBuilder<T> {
+    fn as_ref(&self) -> &[T] {
+        self.0.as_ref()
+    }
+}
+impl<T> AsMut<[T]> for NonEmptyListBuilder<T> {
+    fn as_mut(&mut self) -> &mut [T] {
+        self.0.as_mut()
     }
 }
 
@@ -344,12 +438,12 @@ mod tests {
     #[test]
     fn test_non_empty_list_push_after_clone() {
         let vec = vec![1, 2];
-        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+        let original_list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
 
-        let mut cloned_list = list.clone();
+        let mut cloned_list = original_list.clone();
         cloned_list.push(3);
 
-        assert_eq!(list.as_ref(), &[1, 2]);
+        assert_eq!(original_list.as_ref(), &[1, 2]);
         assert_eq!(cloned_list.as_ref(), &[1, 2, 3]);
     }
 
@@ -444,5 +538,127 @@ mod tests {
         assert_eq!(list.as_ref()[0], 0);
         assert_eq!(list.as_ref()[1], 1);
         assert_eq!(list.len.get(), 1_000_001);
+    }
+
+    #[test]
+    fn test_remove_middle_element() {
+        let vec = vec![1, 2, 3, 4, 5];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        let removed = list.remove(2); // Remove element at index 2
+        assert_eq!(removed, 3);
+        assert_eq!(list.as_ref(), &[1, 2, 4, 5]);
+    }
+
+    #[test]
+    fn test_remove_first_element() {
+        let vec = vec![1, 2, 3];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        let removed = list.remove(0); // Remove first element
+        assert_eq!(removed, 1);
+        assert_eq!(list.as_ref(), &[2, 3]);
+    }
+
+    #[test]
+    fn test_remove_last_element() {
+        let vec = vec![1, 2, 3];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        let removed = list.remove(2); // Remove last element
+        assert_eq!(removed, 3);
+        assert_eq!(list.as_ref(), &[1, 2]);
+    }
+
+    #[test]
+    #[should_panic(expected = "index out of bounds")]
+    fn test_remove_out_of_bounds() {
+        let vec = vec![1, 2, 3];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        list.remove(3); // Attempt to remove out-of-bounds index
+    }
+
+    #[test]
+    fn test_swap_remove_middle_element() {
+        let vec = vec![1, 2, 3, 4, 5];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        let removed = list.swap_remove(2); // Swap and remove element at index 2
+        assert_eq!(removed, 3);
+        assert_eq!(list.as_ref(), &[1, 2, 5, 4]); // Last element swapped into position 2
+    }
+
+    #[test]
+    fn test_swap_remove_first_element() {
+        let vec = vec![1, 2, 3];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        let removed = list.swap_remove(0); // Swap and remove first element
+        assert_eq!(removed, 1);
+        assert_eq!(list.as_ref(), &[3, 2]); // Last element swapped into position 0
+    }
+
+    #[test]
+    fn test_swap_remove_last_element() {
+        let vec = vec![1, 2, 3];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        let removed = list.swap_remove(2); // Swap and remove last element
+        assert_eq!(removed, 3);
+        assert_eq!(list.as_ref(), &[1, 2]); // List remains unchanged except for the removal
+    }
+
+    #[test]
+    #[should_panic(expected = "index out of bounds")]
+    fn test_swap_remove_out_of_bounds() {
+        let vec = vec![1, 2, 3];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        list.swap_remove(3); // Attempt to swap-remove out-of-bounds index
+    }
+
+    #[test]
+    #[should_panic(expected = "attempted remove which would make the list empty")]
+    fn test_remove_last_element_invalid() {
+        let vec = vec![1];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        list.remove(0); // Attempt to remove the last remaining element
+    }
+
+    #[test]
+    #[should_panic(expected = "attempted remove which would make the list empty")]
+    fn test_swap_remove_last_element_invalid() {
+        let vec = vec![1];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        list.swap_remove(0); // Attempt to swap-remove the last remaining element
+    }
+
+    #[test]
+    fn test_remove_and_push_back() {
+        let vec = vec![1, 2, 3, 4];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        let removed = list.remove(1); // Remove element at index 1
+        assert_eq!(removed, 2);
+        assert_eq!(list.as_ref(), &[1, 3, 4]);
+
+        list.push(5);
+        assert_eq!(list.as_ref(), &[1, 3, 4, 5]);
+    }
+
+    #[test]
+    fn test_swap_remove_and_push_back() {
+        let vec = vec![1, 2, 3, 4];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        let removed = list.swap_remove(1); // Swap and remove element at index 1
+        assert_eq!(removed, 2);
+        assert_eq!(list.as_ref(), &[1, 4, 3]);
+
+        list.push(5);
+        assert_eq!(list.as_ref(), &[1, 4, 3, 5]);
     }
 }
