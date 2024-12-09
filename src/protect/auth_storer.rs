@@ -1,4 +1,7 @@
-use crate::{protect::auth::AUTH_DATA_LOCATION, s3::get_bytes_or_default, Realm};
+use crate::{
+    non_empty_list::NonEmptyList, protect::auth::AUTH_DATA_LOCATION, s3::get_bytes_or_default,
+    Realm,
+};
 use aes_gcm::{
     aead::{Aead, Nonce},
     Aes256Gcm, Key, KeyInit,
@@ -10,10 +13,12 @@ use s3::Bucket;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_slice, to_vec};
 use sha2::Sha256;
-use std::{collections::HashMap, env::var, sync::LazyLock};
-use std::collections::hash_map::Entry;
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    env::var,
+    sync::LazyLock,
+};
 use uuid::Uuid;
-use crate::non_empty_list::NonEmptyList;
 
 static AUTH_KEY: LazyLock<Key<Aes256Gcm>> = LazyLock::new(|| {
     let password = var("AUTH_ENCRYPTION_KEY").expect("unable to find env var AUTH_ENCRYPTION_KEY");
@@ -48,7 +53,11 @@ struct StoredAuthStorer {
 impl From<StoredAuthStorer> for AuthStorer {
     fn from(value: StoredAuthStorer) -> Self {
         Self {
-            realms: value.realms.into_iter().flat_map(|(realm, vec)| NonEmptyList::new(vec).map(|nel| (realm, nel))).collect(),
+            realms: value
+                .realms
+                .into_iter()
+                .flat_map(|(realm, vec)| NonEmptyList::new(vec).map(|nel| (realm, nel)))
+                .collect(),
             users: HashMap::from_iter(value.users),
         }
     }
@@ -56,7 +65,11 @@ impl From<StoredAuthStorer> for AuthStorer {
 impl From<AuthStorer> for StoredAuthStorer {
     fn from(value: AuthStorer) -> Self {
         Self {
-            realms: value.realms.into_iter().map(|(realm, nel)| (realm, nel.into())).collect(),
+            realms: value
+                .realms
+                .into_iter()
+                .map(|(realm, nel)| (realm, nel.into()))
+                .collect(),
             users: Vec::from_iter(value.users),
         }
     }
@@ -145,8 +158,8 @@ impl AuthStorer {
             match list.clone().retain(|uuid| uuid != user) {
                 Some(x) => {
                     *list = x;
-                },
-                None => realms_to_remove.push(realm.clone())
+                }
+                None => realms_to_remove.push(realm.clone()),
             }
         }
         for rtr in realms_to_remove {
@@ -194,10 +207,10 @@ impl AuthStorer {
         match self.realms.entry(pattern) {
             Entry::Occupied(mut occ) => {
                 occ.get_mut().extend(uuids);
-            },
+            }
             Entry::Vacant(vac) => {
                 vac.insert(uuids);
-            },
+            }
         }
     }
 

@@ -4,11 +4,10 @@ use std::{
     marker::PhantomData,
     mem::ManuallyDrop,
     num::NonZeroUsize,
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut, Index, IndexMut},
     ptr::{self, copy, NonNull},
     slice, vec,
 };
-use std::ops::{Index, IndexMut};
 
 ///list that cannot be empty, and is push-only
 pub struct NonEmptyList<T> {
@@ -31,10 +30,8 @@ impl<T> NonEmptyList<T> {
         }
     }
 
-    pub fn single_element (el: T) -> Self {
-        unsafe {
-            Self::from_non_empty_vec(vec![el])
-        }
+    pub fn single_element(el: T) -> Self {
+        unsafe { Self::from_non_empty_vec(vec![el]) }
     }
 
     ///# Safety
@@ -207,7 +204,8 @@ impl<T> NonEmptyList<T> {
 
     pub fn retain<F>(self, f: F) -> Option<Self>
     where
-        F: FnMut(&mut T) -> bool {
+        F: FnMut(&mut T) -> bool,
+    {
         let mut v: Vec<T> = self.into();
         v.retain_mut(f);
         Self::new(v)
@@ -305,9 +303,7 @@ impl<T> Index<usize> for NonEmptyList<T> {
             panic!("attempted index out of bounds");
         }
 
-        unsafe {
-            self.ptr.add(index).as_ref()
-        }
+        unsafe { self.ptr.add(index).as_ref() }
     }
 }
 
@@ -317,9 +313,7 @@ impl<T> IndexMut<usize> for NonEmptyList<T> {
             panic!("attempted index out of bounds");
         }
 
-        unsafe {
-            self.ptr.add(index).as_mut()
-        }
+        unsafe { self.ptr.add(index).as_mut() }
     }
 }
 

@@ -1,7 +1,8 @@
-use crate::{protect::auth_storer::AuthStorer, s3::get_bucket, Realm};
+use crate::{
+    non_empty_list::NonEmptyList, protect::auth_storer::AuthStorer, s3::get_bucket, Realm,
+};
 use comfy_table::Table;
 use dialoguer::{theme::ColorfulTheme, Confirm, FuzzySelect, Input, MultiSelect, Password, Select};
-use crate::non_empty_list::NonEmptyList;
 
 pub mod auth;
 pub mod auth_storer;

@@ -87,5 +87,5 @@ fn get_nonempty_directives(theme: &dyn Theme) -> color_eyre::Result<NonEmptyList
         .map(|_| Directive::get_from_stdin(theme))
         .collect::<Result<_, _>>()?;
 
-    Ok(NonEmptyList::new(directives).unwrap())
+    Ok(NonEmptyList::new(directives).expect("number of directives should be > 0"))
 }

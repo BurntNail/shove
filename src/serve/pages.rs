@@ -253,11 +253,8 @@ impl PageOutput {
             .header(header::CONTENT_TYPE, self.content_type)
             .header(header::CONTENT_LENGTH, self.content.len());
 
-        if !self.cache_control.is_empty() {
-            builder = builder.header(
-                header::CACHE_CONTROL,
-                Directive::directives_to_header(self.cache_control).unwrap(),
-            );
+        if let Some(cc) = Directive::directives_to_header(self.cache_control) {
+            builder = builder.header(header::CACHE_CONTROL, cc);
         }
 
         if req_method == Method::HEAD {
