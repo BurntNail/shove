@@ -31,6 +31,12 @@ impl<T> NonEmptyList<T> {
         }
     }
 
+    pub fn single_element (el: T) -> Self {
+        unsafe {
+            Self::from_non_empty_vec(vec![el])
+        }
+    }
+
     ///# Safety
     /// Passed in list must not be empty.
     pub unsafe fn from_non_empty_vec(list: Vec<T>) -> Self {
@@ -197,6 +203,14 @@ impl<T> NonEmptyList<T> {
 
     pub fn iter_mut(&mut self) -> slice::IterMut<T> {
         self.as_mut().iter_mut()
+    }
+
+    pub fn retain<F>(self, f: F) -> Option<Self>
+    where
+        F: FnMut(&mut T) -> bool {
+        let mut v: Vec<T> = self.into();
+        v.retain_mut(f);
+        Self::new(v)
     }
 }
 

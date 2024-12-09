@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{from_slice, to_vec};
 use sha2::Sha256;
 use std::{collections::HashMap, env::var, sync::LazyLock};
+use std::collections::hash_map::Entry;
 use uuid::Uuid;
+use crate::non_empty_list::NonEmptyList;
 
 static AUTH_KEY: LazyLock<Key<Aes256Gcm>> = LazyLock::new(|| {
     let password = var("AUTH_ENCRYPTION_KEY").expect("unable to find env var AUTH_ENCRYPTION_KEY");
@@ -33,7 +35,7 @@ struct UsernameAndPassword {
 
 #[derive(Clone, Default)]
 pub struct AuthStorer {
-    realms: HashMap<Realm, Vec<Uuid>>, //TODO: NonEmptyList?
+    realms: HashMap<Realm, NonEmptyList<Uuid>>,
     users: HashMap<Uuid, UsernameAndPassword>,
 }
 
@@ -46,7 +48,7 @@ struct StoredAuthStorer {
 impl From<StoredAuthStorer> for AuthStorer {
     fn from(value: StoredAuthStorer) -> Self {
         Self {
-            realms: HashMap::from_iter(value.realms),
+            realms: value.realms.into_iter().flat_map(|(realm, vec)| NonEmptyList::new(vec).map(|nel| (realm, nel))).collect(),
             users: HashMap::from_iter(value.users),
         }
     }
@@ -54,8 +56,8 @@ impl From<StoredAuthStorer> for AuthStorer {
 impl From<AuthStorer> for StoredAuthStorer {
     fn from(value: AuthStorer) -> Self {
         Self {
-            realms: value.realms.into_iter().collect(),
-            users: value.users.into_iter().collect(),
+            realms: value.realms.into_iter().map(|(realm, nel)| (realm, nel.into())).collect(),
+            users: Vec::from_iter(value.users),
         }
     }
 }
@@ -138,9 +140,19 @@ impl AuthStorer {
     }
 
     pub fn rm_user(&mut self, user: &Uuid) {
-        for (_, list) in self.realms.iter_mut() {
-            list.retain_mut(|uuid| uuid != user);
+        let mut realms_to_remove = vec![];
+        for (realm, list) in self.realms.iter_mut() {
+            match list.clone().retain(|uuid| uuid != user) {
+                Some(x) => {
+                    *list = x;
+                },
+                None => realms_to_remove.push(realm.clone())
+            }
         }
+        for rtr in realms_to_remove {
+            self.realms.remove(&rtr);
+        }
+
         self.users.remove(user);
     }
 
@@ -174,20 +186,30 @@ impl AuthStorer {
         Ok(uuid)
     }
 
-    pub fn protect(&mut self, pattern: Realm, uuids: Vec<Uuid>) {
+    pub fn protect(&mut self, pattern: Realm, uuids: NonEmptyList<Uuid>) {
         self.realms.insert(pattern, uuids);
     }
 
-    pub fn protect_additional(&mut self, pattern: Realm, uuids: Vec<Uuid>) {
-        self.realms.entry(pattern).or_default().extend(uuids);
+    pub fn protect_additional(&mut self, pattern: Realm, uuids: NonEmptyList<Uuid>) {
+        match self.realms.entry(pattern) {
+            Entry::Occupied(mut occ) => {
+                occ.get_mut().extend(uuids);
+            },
+            Entry::Vacant(vac) => {
+                vac.insert(uuids);
+            },
+        }
+    }
+
+    pub fn remove_protection(&mut self, pattern: Realm) {
+        self.realms.remove(&pattern);
     }
 
     pub fn get_users_with_access_to_realm(&self, pat: &Realm) -> Vec<Uuid> {
         self.realms
             .iter()
             .find(|(this_pat, _)| this_pat == &pat)
-            .map(|(_, uuids)| uuids)
-            .cloned()
+            .map(|(_, uuids)| Vec::from(uuids.clone()))
             .unwrap_or_default()
     }
 

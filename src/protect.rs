@@ -1,6 +1,7 @@
 use crate::{protect::auth_storer::AuthStorer, s3::get_bucket, Realm};
 use comfy_table::Table;
 use dialoguer::{theme::ColorfulTheme, Confirm, FuzzySelect, Input, MultiSelect, Password, Select};
+use crate::non_empty_list::NonEmptyList;
 
 pub mod auth;
 pub mod auth_storer;
@@ -123,7 +124,7 @@ pub async fn protect() -> color_eyre::Result<()> {
 
             for i in should_have_access_to {
                 let pat = realms[i].clone();
-                existing_auth.protect_additional(pat, vec![uuid]);
+                existing_auth.protect_additional(pat, NonEmptyList::single_element(uuid));
             }
 
             existing_auth.save(&bucket).await?;
@@ -140,7 +141,7 @@ pub async fn protect() -> color_eyre::Result<()> {
                     vec![]
                 } else {
                     MultiSelect::with_theme(&theme)
-                        .with_prompt("Which users should have access to this?")
+                        .with_prompt("Which users should have access to this? NB: No users selected will mean anyone can access this page")
                         .items(&users.iter().map(|(_, un)| un).collect::<Vec<_>>())
                         .interact()?
                         .into_iter()
@@ -150,7 +151,15 @@ pub async fn protect() -> color_eyre::Result<()> {
                 }
             };
 
-            existing_auth.protect(pat, uuids);
+            match NonEmptyList::new(uuids) {
+                None => {
+                    existing_auth.remove_protection(pat);
+                }
+                Some(uuids) => {
+                    existing_auth.protect(pat, uuids);
+                }
+            }
+
             existing_auth.save(&bucket).await?;
         }
         6 => {
@@ -183,7 +192,7 @@ pub async fn protect() -> color_eyre::Result<()> {
                         .collect();
 
                     MultiSelect::with_theme(&theme)
-                        .with_prompt("Which users should have access to this?")
+                        .with_prompt("Which users should have access to this? NB: No users will mean anyone can access this.")
                         .items(&users.iter().map(|(_, un)| un).collect::<Vec<_>>())
                         .defaults(&highlighted)
                         .interact()?
@@ -194,7 +203,15 @@ pub async fn protect() -> color_eyre::Result<()> {
                 }
             };
 
-            existing_auth.protect(pat, uuids);
+            match NonEmptyList::new(uuids) {
+                None => {
+                    existing_auth.remove_protection(pat);
+                }
+                Some(uuids) => {
+                    existing_auth.protect(pat, uuids);
+                }
+            }
+
             existing_auth.save(&bucket).await?;
         }
         _ => unreachable!(),

@@ -23,6 +23,7 @@ use std::{
 };
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
+use crate::non_empty_list::NonEmptyList;
 
 pub const AUTH_DATA_LOCATION: &str = "authdata";
 
@@ -117,11 +118,11 @@ impl AuthChecker {
         self.auth.write().await.add_user(username, password)
     }
 
-    pub async fn protect(&self, pattern: Realm, uuids: Vec<Uuid>) {
+    pub async fn protect(&self, pattern: Realm, uuids: NonEmptyList<Uuid>) {
         self.auth.write().await.protect(pattern, uuids);
     }
 
-    pub async fn protect_additional(&self, pattern: Realm, uuids: Vec<Uuid>) {
+    pub async fn protect_additional(&self, pattern: Realm, uuids: NonEmptyList<Uuid>) {
         self.auth.write().await.protect_additional(pattern, uuids);
     }
 
