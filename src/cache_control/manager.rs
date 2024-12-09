@@ -8,6 +8,9 @@ use tokio::sync::Mutex;
 use crate::{hash_raw_bytes, Realm};
 use std::fmt::Write;
 use color_eyre::eyre::bail;
+use dialoguer::{FuzzySelect, Input};
+use dialoguer::theme::Theme;
+use crate::non_empty_list::NonEmptyList;
 use crate::s3::get_bytes_or_default;
 
 
@@ -59,6 +62,30 @@ impl Directive {
 
         Some(output)
     }
+
+    pub fn get_from_stdin (theme: &dyn Theme) -> color_eyre::Result<Self> {
+        let choice = FuzzySelect::with_theme(theme)
+            .with_prompt("Which directive?")
+            .items(&[
+                "Max Age",
+                "No Cache",
+                "Must Revalidate",
+                "No Store",
+                "Stale While Revalidate"
+            ]).interact()?;
+
+        Ok(match choice {
+            0 => {
+                let max_age = Input::with_theme(theme).with_prompt("What should the max age (seconds) be?").interact()?;
+                Self::MaxAge(max_age)
+            },
+            1 => Self::NoCache,
+            2 => Self::MustRevalidate,
+            3 => Self::NoStore,
+            4 => Self::StaleWhileRevalidate,
+            _ => unreachable!()
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -102,35 +129,37 @@ impl CacheControlManager {
     }
 
     pub async fn get_directives (&self, path: &str) -> Vec<Directive> {
-        self.current.read().await.get_cache_control_directives(path).await
+        self.current.read().await.get_cache_control_directives(path)
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct Caching {
-    default: Option<Directive>,
-    overrides: HashMap<Realm, Vec<Directive>>
+    pub default: Option<NonEmptyList<Directive>>,
+    overrides: HashMap<Realm, NonEmptyList<Directive>>
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct StoredCaching {
-    default: Option<Directive>,
+    default: Vec<Directive>,
     overrides: Vec<(Realm, Vec<Directive>)>
 }
 
 impl From<Caching> for StoredCaching {
     fn from(value: Caching) -> Self {
         Self {
-            default: value.default,
-            overrides: value.overrides.into_iter().collect()
+            default: value.default.map(|x| x.into()).unwrap_or_default(),
+            overrides: value.overrides.into_iter().map(|(r, l)| (r, l.into())).collect()
         }
     }
 }
 impl From<StoredCaching> for Caching {
     fn from(value: StoredCaching) -> Self {
         Self {
-            default: value.default,
-            overrides: value.overrides.into_iter().collect()
+            default: NonEmptyList::new(value.default),
+            overrides: value.overrides.into_iter().flat_map(|(realm, dirs)| {
+                NonEmptyList::new(dirs).map(|nel| (realm, nel))
+            }).collect()
         }
     }
 }
@@ -164,18 +193,26 @@ impl Caching {
         Ok(stored.into())
     }
 
-    pub async fn get_cache_control_directives (&self, path: &str) -> Vec<Directive> {
+    pub fn get_cache_control_directives (&self, path: &str) -> Vec<Directive> {
         let mut from_map: Vec<Directive> = self.overrides.iter()
             .filter(|(realm, _)| realm.matches(path))
             .flat_map(|(_, dirs)| dirs.clone())
             .collect();
 
         if from_map.is_empty() {
-            if let Some(default) = self.default {
-                from_map.push(default);
+            if let Some(default) = &self.default {
+                from_map.extend(default.as_ref())
             }
         }
 
         from_map
+    }
+
+    pub fn get_all_caching_rules (&self) -> HashMap<Realm, NonEmptyList<Directive>> {
+        self.overrides.clone()
+    }
+
+    pub fn set_directives (&mut self, realm: Realm, directives: NonEmptyList<Directive>) {
+        self.overrides.insert(realm, directives);
     }
 }

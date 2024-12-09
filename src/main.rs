@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, env::args};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use crate::cache_control::cache;
 
 pub fn hash_raw_bytes(bytes: impl AsRef<[u8]>) -> Vec<u8> {
     let mut hasher = Sha256::new();
@@ -17,6 +18,7 @@ pub mod s3;
 pub mod serve;
 mod upload;
 pub mod cache_control;
+mod non_empty_list;
 
 #[macro_use]
 extern crate tracing;
@@ -82,6 +84,7 @@ pub enum Args {
     Serve,
     Upload(String),
     Protect,
+    Cache,
 }
 
 impl Args {
@@ -104,10 +107,14 @@ impl Args {
                 "protect" => {
                     return Self::Protect;
                 }
+                "cache" => {
+                    return Self::Cache;
+                }
                 _ => {}
             }
         }
 
+        //could do it all in one, but this way is easier if i want colours
         eprintln!(
             "{} is a command-line utility to upload to and serve from S3 buckets",
             "shove".bold()
@@ -123,6 +130,7 @@ impl Args {
         eprintln!("- {}", "serve".italic());
         eprintln!("- {} {}", "upload".italic(), "[DIR]".blue());
         eprintln!("- {}", "protect".italic());
+        eprintln!("- {}", "cache".italic());
         eprintln!();
         eprintln!("`{}` command", "serve".italic());
         eprintln!(
@@ -149,6 +157,12 @@ impl Args {
             "  Asks the user for a directory to protect, and the username/password combo to protect it",
         );
         eprintln!("  eg. `{}`", "shove protect".cyan());
+        eprintln!();
+        eprintln!("`{}` command", "cache".italic());
+        eprintln!(
+            "  Modifies the cache control headers on files",
+        );
+        eprintln!("  eg. `{}`", "shove cache".cyan());
         eprintln!();
         eprintln!("{}", "Environment Variables".underline());
         eprintln!(
@@ -230,6 +244,13 @@ fn main() {
                     error!(?e, "Error protecting");
                 }
             });
+        }
+        Args::Cache => {
+            runtime.block_on(async move {
+                if let Err(e) = cache().await {
+                    error!(?e, "Error caching");
+                }
+            })
         }
     }
 }
