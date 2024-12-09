@@ -82,6 +82,7 @@ impl AuthChecker {
         Ok(())
     }
 
+    //technically unused, but maybe?
     pub async fn save_to_s3(&self, bucket: &Bucket) -> color_eyre::Result<()> {
         self.auth.read().await.save(bucket).await
     }

@@ -5,7 +5,7 @@ use crate::{
 use http_body_util::Full;
 use hyper::{
     body::{Bytes, Incoming},
-    header, http,
+    http,
     service::Service,
     Method, Request, Response, StatusCode,
 };
@@ -156,18 +156,7 @@ async fn serve_get_head(
     trace!(?path, "Serving");
 
     match state.get(&path).await {
-        Some((content, content_type, sc)) => {
-            let builder = Response::builder()
-                .status(sc)
-                .header(header::CONTENT_TYPE, content_type)
-                .header(header::CONTENT_LENGTH, content.len());
-
-            if req.method() == Method::HEAD {
-                Ok(builder.body(Full::default())?)
-            } else {
-                Ok(builder.body(Full::new(Bytes::from(content)))?)
-            }
-        }
+        Some(po) => po.into_response(req.method()),
         None => {
             let rsp = Response::builder()
                 .status(StatusCode::NOT_FOUND)
