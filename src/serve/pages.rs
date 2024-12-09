@@ -11,7 +11,7 @@ use std::{collections::HashSet, sync::Arc};
 use http_body_util::Full;
 use hyper::body::Bytes;
 use tokio::sync::{Mutex, RwLock};
-use crate::cache_control::{CacheControlManager, Directive};
+use crate::cache_control::manager::{CacheControlManager, Directive};
 
 #[derive(Clone)]
 pub struct Pages {

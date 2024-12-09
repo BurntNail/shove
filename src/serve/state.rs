@@ -6,7 +6,7 @@ use crate::{
 use hyper::{body::Incoming, Request};
 use s3::Bucket;
 use std::{env, net::SocketAddr, sync::Arc};
-use crate::cache_control::CacheControlManager;
+use crate::cache_control::manager::CacheControlManager;
 use crate::serve::pages::PageOutput;
 
 #[derive(Clone)]
