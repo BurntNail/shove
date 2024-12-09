@@ -32,6 +32,8 @@ impl<T> NonEmptyList<T> {
     ///# Safety
     /// Passed in list must not be empty.
     pub unsafe fn from_non_empty_vec (list: Vec<T>) -> Self {
+        debug_assert!(!list.is_empty());
+
         let mut list = ManuallyDrop::new(list);
 
         let len = NonZeroUsize::new_unchecked(list.len());
@@ -41,23 +43,6 @@ impl<T> NonEmptyList<T> {
         Self {
             len, cap, ptr, _pd: PhantomData
         }
-
-        // let mut list = ManuallyDrop::new(list);
-        //
-        // let len = NonZeroUsize::new_unchecked(list.len());
-        // let cap = NonZeroUsize::new_unchecked(list.capacity());
-        // let layout = Layout::array::<T>(cap.get()).expect("unable to get layout");
-        // let ptr = NonNull::new(alloc(layout) as *mut T).expect("unable to allocate");
-        //
-        // copy_nonoverlapping(list.as_ptr(), ptr.as_ptr(), len.get());
-        // dealloc(list.as_mut_ptr() as *mut u8, layout);
-        //
-        // Self {
-        //     len,
-        //     cap,
-        //     ptr,
-        //     _pd: PhantomData
-        // }
     }
 
     fn grow_at_least (&mut self, extra: usize) {
@@ -79,23 +64,15 @@ impl<T> NonEmptyList<T> {
             panic!("New list is too large to be a proper vec");
         }
 
-        let new_cap = match min_cap.checked_next_power_of_two() {
-            Some(x) => if fails_constraints(x) {
-                min_cap
-            } else {
-                x
-            },
-            None => min_cap
-        }.get();
+        let new_cap = min_cap.checked_next_power_of_two().filter(|x| !fails_constraints(*x)).unwrap_or(min_cap);
 
+        //new_size is in bytes, so have to multiply by size_of T
         let new_ptr = NonNull::new(unsafe {
-            realloc(self.ptr.as_ptr() as *mut u8, old_layout, new_cap * size_of::<T>()) as *mut T
+            realloc(self.ptr.as_ptr() as *mut u8, old_layout, new_cap.get() * size_of::<T>()) as *mut T
         }).expect("reallocation of new empty list failed");
 
         self.ptr = new_ptr;
-        self.cap = unsafe {
-            NonZeroUsize::new_unchecked(new_cap)
-        };
+        self.cap = new_cap;
     }
 
     pub fn push (&mut self, el: T) {
@@ -140,9 +117,9 @@ impl<T> NonEmptyList<T> {
 
 impl<T> From<NonEmptyList<T>> for Vec<T> {
     fn from(value: NonEmptyList<T>) -> Self {
-        //safety: takes ownership of the NEL
+        let md = ManuallyDrop::new(value);
         unsafe {
-            Vec::from_raw_parts(value.ptr.as_ptr(), value.len.get(), value.cap.get())
+            Vec::from_raw_parts(md.ptr.as_ptr(), md.len.get(), md.cap.get())
         }
     }
 }
@@ -329,15 +306,130 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(miri))] //takes too long
     fn test_large_extend() {
         let vec = vec![1];
         let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
 
-        let large_iter = (2..10_000).collect::<Vec<_>>();
+        let large_iter = (2..1_000_000).collect::<Vec<_>>();
         list.extend(large_iter);
 
         assert_eq!(list.len.get(), 10_000 - 1);
         assert_eq!(list.as_ref()[0], 1);
         assert_eq!(list.as_ref()[1], 2);
+    }
+
+    #[test]
+    fn test_non_empty_list_into_iter() {
+        let vec = vec![1, 2, 3];
+        let list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        let collected: Vec<_> = list.into_iter().collect();
+        assert_eq!(collected, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_non_empty_list_push_after_clone() {
+        let vec = vec![1, 2];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        let mut cloned_list = list.clone();
+        cloned_list.push(3);
+
+        assert_eq!(list.as_ref(), &[1, 2]);
+        assert_eq!(cloned_list.as_ref(), &[1, 2, 3]);
+    }
+
+    #[test]
+    fn test_extend_empty_iterator() {
+        let vec = vec![1, 2, 3];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        list.extend(Vec::<i32>::new());
+
+        assert_eq!(list.as_ref(), &[1, 2, 3]);
+    }
+
+    #[test]
+    fn test_as_mut_modifies_elements() {
+        let vec = vec![10, 20, 30];
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        let slice = list.as_mut();
+        for element in slice.iter_mut() {
+            *element *= 2;
+        }
+
+        assert_eq!(list.as_ref(), &[20, 40, 60]);
+    }
+
+    #[test]
+    fn test_drop_releases_memory() {
+        let vec = vec![1, 2, 3];
+        let list = unsafe { NonEmptyList::from_non_empty_vec(vec) };
+
+        // Explicit drop to ensure memory is released
+        drop(list);
+        // Since there's no memory tracking here, just ensure no UB or double-free happens.
+    }
+
+    #[test]
+    fn test_large_push_sequence() {
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec![1]) };
+
+        for i in 2..=1000 {
+            list.push(i);
+        }
+
+        assert_eq!(list.len.get(), 1000);
+        assert_eq!(list.as_ref()[0], 1);
+        assert_eq!(list.as_ref()[999], 1000);
+    }
+
+    #[test]
+    #[should_panic(expected = "unable to create large enough list")]
+    fn test_push_beyond_max_capacity() {
+        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec![1]) };
+
+        // Try pushing to the maximum possible capacity, which should panic
+        list.grow_at_least(usize::MAX);
+    }
+
+    #[test]
+    fn test_debug_formatting_with_empty_extend() {
+        let mut list = NonEmptyList::new(vec![1, 2, 3]).unwrap();
+
+        list.extend(vec![]); // Extend with empty iterator
+        assert_eq!(format!("{:?}", list), "[1, 2, 3]");
+    }
+
+    #[test]
+    fn test_conversion_to_vec() {
+        let vec = vec![1, 2, 3];
+        let list = NonEmptyList::new(vec.clone()).unwrap();
+
+        let result_vec: Vec<_> = list.into();
+        assert_eq!(result_vec, vec);
+    }
+
+    #[test]
+    fn test_empty_builder_rejection() {
+        let builder = NonEmptyListBuilder::<i32>(vec![]);
+        let result = NonEmptyList::try_from(builder);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    #[cfg(not(miri))] //takes too long
+    fn test_non_empty_list_large_extend_with_iter() {
+        let mut list = NonEmptyList::new(vec![0]).unwrap();
+
+        let range_iter = 1..=1_000_000;
+        list.extend(range_iter);
+
+        assert_eq!(list.as_ref()[0], 0);
+        assert_eq!(list.as_ref()[1], 1);
+        assert_eq!(list.len.get(), 1_000_001);
     }
 }
