@@ -1,5 +1,13 @@
-use std::{alloc::{alloc, dealloc, realloc, Layout}, fmt::{Debug, Formatter}, marker::PhantomData, mem::ManuallyDrop, num::NonZeroUsize, ops::{Deref, DerefMut, Index, IndexMut}, ptr, ptr::NonNull, slice, vec};
-use std::mem::needs_drop;
+use std::{
+    alloc::{alloc, dealloc, realloc, Layout},
+    fmt::{Debug, Formatter},
+    marker::PhantomData,
+    mem::{needs_drop, ManuallyDrop},
+    num::NonZeroUsize,
+    ops::{Deref, DerefMut, Index, IndexMut},
+    ptr::{self, NonNull},
+    slice, vec,
+};
 
 ///list that cannot be empty, and is push-only
 pub struct NonEmptyList<T> {
@@ -28,7 +36,7 @@ impl<T> NonEmptyList<T> {
                 ptr: NonNull::dangling(),
                 len: NonZeroUsize::new(1).unwrap(),
                 cap: NonZeroUsize::new(usize::MAX).unwrap(),
-                _pd: PhantomData
+                _pd: PhantomData,
             };
         }
 
@@ -36,7 +44,8 @@ impl<T> NonEmptyList<T> {
         //safety: we know it's uninit and we use the length
         //safety: we know we're not dealing with ZSTs
         let ptr = unsafe {
-            NonNull::new(alloc(layout) as *mut T).expect("unable to allocate space for single element")
+            NonNull::new(alloc(layout) as *mut T)
+                .expect("unable to allocate space for single element")
         };
         debug_assert!(ptr.is_aligned());
         //safety: dst is valid and aligned
@@ -48,7 +57,10 @@ impl<T> NonEmptyList<T> {
         let cap = NonZeroUsize::new(1).unwrap();
 
         Self {
-            ptr, len, cap, _pd: PhantomData
+            ptr,
+            len,
+            cap,
+            _pd: PhantomData,
         }
     }
 
@@ -60,7 +72,7 @@ impl<T> NonEmptyList<T> {
                 ptr: NonNull::dangling(),
                 len: NonZeroUsize::new(list.len()).unwrap(),
                 cap: NonZeroUsize::new(usize::MAX).unwrap(),
-                _pd: PhantomData
+                _pd: PhantomData,
             };
         }
 
@@ -235,7 +247,10 @@ impl<T> NonEmptyList<T> {
         if size_of::<T>() == 0 {
             let mut count = 0;
             iter.for_each(|_| count += 1);
-            self.len = self.len.checked_add(count).expect("unable to create space for additional ZSTs");
+            self.len = self
+                .len
+                .checked_add(count)
+                .expect("unable to create space for additional ZSTs");
             return;
         }
 
@@ -243,8 +258,10 @@ impl<T> NonEmptyList<T> {
         let (min, max) = (NonZeroUsize::new(min), max.and_then(NonZeroUsize::new));
         match max {
             Some(max) => self.grow_at_least(max),
-            None => if let Some(min) = min {
-                self.grow_at_least(min);
+            None => {
+                if let Some(min) = min {
+                    self.grow_at_least(min);
+                }
             }
         }
 
@@ -288,7 +305,7 @@ impl<T> NonEmptyList<T> {
         Self::new(v)
     }
 
-    pub fn first (&self) -> &T {
+    pub fn first(&self) -> &T {
         debug_assert!(self.ptr.is_aligned());
 
         unsafe {
@@ -299,7 +316,7 @@ impl<T> NonEmptyList<T> {
         }
     }
 
-    pub fn first_mut (&mut self) -> &mut T {
+    pub fn first_mut(&mut self) -> &mut T {
         debug_assert!(self.ptr.is_aligned());
 
         unsafe {
@@ -310,7 +327,7 @@ impl<T> NonEmptyList<T> {
         }
     }
 
-    pub fn last (&self) -> &T {
+    pub fn last(&self) -> &T {
         debug_assert!(self.ptr.is_aligned());
 
         unsafe {
@@ -321,7 +338,7 @@ impl<T> NonEmptyList<T> {
         }
     }
 
-    pub fn last_mut (&mut self) -> &mut T {
+    pub fn last_mut(&mut self) -> &mut T {
         debug_assert!(self.ptr.is_aligned());
 
         unsafe {
@@ -331,7 +348,6 @@ impl<T> NonEmptyList<T> {
             self.ptr.add(self.len() - 1).as_mut()
         }
     }
-
 }
 
 impl<T> From<NonEmptyList<T>> for Vec<T> {
@@ -361,8 +377,8 @@ impl<T> Drop for NonEmptyList<T> {
             ));
 
             if size_of::<T>() != 0 {
-                let layout =
-                    Layout::array::<T>(self.cap.get()).expect("used this alloc to get the allocation");
+                let layout = Layout::array::<T>(self.cap.get())
+                    .expect("used this alloc to get the allocation");
                 dealloc(self.ptr.as_ptr() as *mut u8, layout);
             }
         }
@@ -387,7 +403,7 @@ impl<T: Clone> Clone for NonEmptyList<T> {
                 ptr: NonNull::dangling(),
                 len: self.len,
                 cap: NonZeroUsize::new(usize::MAX).unwrap(),
-                _pd: PhantomData
+                _pd: PhantomData,
             };
         }
 
@@ -510,8 +526,7 @@ impl<T> AsMut<[T]> for NonEmptyListBuilder<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use std::{cell::RefCell, rc::Rc};
 
     #[test]
     fn test_non_empty_list_from_vec() {
@@ -973,7 +988,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test_drop_behavior_with_refcell() {
         let drop_count = Rc::new(RefCell::new(0));
@@ -1092,10 +1106,12 @@ mod tests {
 
         // Retain only the first element (dummy condition for ZSTs)
         let mut count = 0;
-        list = list.retain(|_| {
-            count += 1;
-            count == 1
-        }).unwrap();
+        list = list
+            .retain(|_| {
+                count += 1;
+                count == 1
+            })
+            .unwrap();
 
         assert_eq!(list.len(), 1);
         assert_eq!(list.as_ref(), &[ZST]);
@@ -1118,4 +1134,3 @@ mod tests {
         assert_eq!(list[1], ZST);
     }
 }
-

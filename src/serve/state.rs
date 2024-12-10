@@ -69,7 +69,11 @@ impl State {
         {
             error!(?e, "Error reloading pages")
         }
-        if let Err(e) = self.cache_control_manager.check_and_reload(&self.bucket).await {
+        if let Err(e) = self
+            .cache_control_manager
+            .check_and_reload(&self.bucket)
+            .await
+        {
             error!(?e, "Error reloading cache control manager");
         }
 

@@ -1,6 +1,7 @@
 use crate::{
     cache_control::manager::{CacheControlManager, Directive},
     hash_raw_bytes,
+    non_empty_list::NonEmptyList,
     s3::UPLOAD_DATA_LOCATION,
     serve::livereload::LiveReloader,
     UploadData,
@@ -14,7 +15,6 @@ use s3::{error::S3Error, Bucket};
 use serde_json::from_slice;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{Mutex, RwLock};
-use crate::non_empty_list::NonEmptyList;
 
 #[derive(Clone)]
 pub struct Pages {
@@ -254,9 +254,8 @@ impl PageOutput {
             .header(header::CONTENT_TYPE, self.content_type)
             .header(header::CONTENT_LENGTH, self.content.len());
 
-
-
-        if let Some(cc) = NonEmptyList::new(self.cache_control).map(Directive::directives_to_header) {
+        if let Some(cc) = NonEmptyList::new(self.cache_control).map(Directive::directives_to_header)
+        {
             builder = builder.header(header::CACHE_CONTROL, cc);
         }
 

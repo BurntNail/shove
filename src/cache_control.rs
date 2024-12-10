@@ -35,7 +35,10 @@ pub async fn cache() -> color_eyre::Result<()> {
             table.set_header(vec!["Pattern", "Rules"]);
 
             for (pat, rules) in caching.get_all_caching_rules() {
-                table.add_row(vec![format!("{pat:?}"), Directive::directives_to_header(rules)]);
+                table.add_row(vec![
+                    format!("{pat:?}"),
+                    Directive::directives_to_header(rules),
+                ]);
             }
 
             println!("{table}");
