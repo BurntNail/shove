@@ -96,7 +96,7 @@ impl CacheControlManager {
         })
     }
 
-    pub async fn reload(&self, bucket: &Bucket) -> color_eyre::Result<()> {
+    pub async fn check_and_reload(&self, bucket: &Bucket) -> color_eyre::Result<()> {
         let Ok(mut last_hash) = self.last_hash.try_lock() else {
             bail!("already reloading cache control")
         };
