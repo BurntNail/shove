@@ -59,9 +59,11 @@ impl State {
     pub async fn check_and_reload(&self) -> color_eyre::Result<()> {
         trace!("Checking for reload");
 
+        trace!("Checking for auth reload");
         if let Err(e) = self.auth.check_and_reload(&self.bucket).await {
             error!(?e, "Error reloading auth checker");
         }
+        trace!("Checking for pages reload");
         if let Err(e) = self
             .pages
             .check_and_reload(&self.bucket, self.live_reloader.clone())
@@ -69,6 +71,7 @@ impl State {
         {
             error!(?e, "Error reloading pages")
         }
+        trace!("Checking for Cache Control reload");
         if let Err(e) = self
             .cache_control_manager
             .check_and_reload(&self.bucket)

@@ -188,7 +188,7 @@ impl Pages {
         ccm: &CacheControlManager,
     ) -> Option<PageOutput> {
         let root = self.upload_data.read().await.clone().root;
-        let path = format!("{root}{path}");
+        let cache_path = format!("{root}{path}");
 
         let not_found = || async {
             let (content, content_type) = self.cache.get(&format!("{root}/404.html")).await?;
@@ -200,8 +200,8 @@ impl Pages {
             })
         };
 
-        if let Some((content, content_type)) = self.cache.get(&path).await {
-            let cache_control = ccm.get_directives(&path).await;
+        if let Some((content, content_type)) = self.cache.get(&cache_path).await {
+            let cache_control = ccm.get_directives(path).await;
             return Some(PageOutput {
                 content,
                 content_type,
@@ -210,14 +210,14 @@ impl Pages {
             });
         }
 
-        match self.upload_data.read().await.entries.get(&path) {
-            Some(_hash) => match Self::read_file_from_s3(path.clone(), bucket).await {
-                Ok((content, content_type, path)) => {
-                    info!(?path, "Adding to cache");
+        match self.upload_data.read().await.entries.get(&cache_path) {
+            Some(_hash) => match Self::read_file_from_s3(cache_path.clone(), bucket).await {
+                Ok((content, content_type, cache_path)) => {
+                    info!(?cache_path, "Adding to cache");
                     self.cache
-                        .insert(path.clone(), (content.clone(), content_type.clone()))
+                        .insert(cache_path.clone(), (content.clone(), content_type.clone()))
                         .await;
-                    let cache_control = ccm.get_directives(&path).await;
+                    let cache_control = ccm.get_directives(path).await;
                     Some(PageOutput {
                         content,
                         content_type,
@@ -230,7 +230,7 @@ impl Pages {
                         ?e,
                         "Error getting file from S3, removing from local upload data"
                     );
-                    self.upload_data.write().await.entries.remove(&path);
+                    self.upload_data.write().await.entries.remove(&cache_path);
 
                     not_found().await
                 }
