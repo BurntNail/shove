@@ -1,13 +1,5 @@
-use std::{
-    alloc::{alloc, dealloc, realloc, Layout},
-    fmt::{Debug, Formatter},
-    marker::PhantomData,
-    mem::ManuallyDrop,
-    num::NonZeroUsize,
-    ops::{Deref, DerefMut, Index, IndexMut},
-    ptr::{self, copy, NonNull},
-    slice, vec,
-};
+use std::{alloc::{alloc, dealloc, realloc, Layout}, fmt::{Debug, Formatter}, marker::PhantomData, mem::ManuallyDrop, num::NonZeroUsize, ops::{Deref, DerefMut, Index, IndexMut}, ptr, ptr::NonNull, slice, vec};
+use std::mem::needs_drop;
 
 ///list that cannot be empty, and is push-only
 pub struct NonEmptyList<T> {
@@ -31,12 +23,43 @@ impl<T> NonEmptyList<T> {
     }
 
     pub fn single_element(el: T) -> Self {
-        unsafe { Self::from_non_empty_vec(vec![el]) }
+        if size_of::<T>() == 0 {
+            return Self {
+                ptr: NonNull::dangling(),
+                len: NonZeroUsize::new(1).unwrap(),
+                cap: NonZeroUsize::new(usize::MAX).unwrap(),
+                _pd: PhantomData
+            };
+        }
+
+        let layout = Layout::array::<T>(1).expect("unable to create layout for single element");
+        let ptr = unsafe {
+            NonNull::new(alloc(layout) as *mut T).expect("unable to allocate space for single element")
+        };
+        unsafe {
+            ptr.write(el);
+        }
+
+        let len = NonZeroUsize::new(1).unwrap();
+        let cap = NonZeroUsize::new(1).unwrap();
+
+        Self {
+            ptr, len, cap, _pd: PhantomData
+        }
     }
 
     ///# Safety
     /// Passed in list must not be empty.
     pub unsafe fn from_non_empty_vec(list: Vec<T>) -> Self {
+        if size_of::<T>() == 0 {
+            return Self {
+                ptr: NonNull::dangling(),
+                len: NonZeroUsize::new(list.len()).unwrap(),
+                cap: NonZeroUsize::new(usize::MAX).unwrap(),
+                _pd: PhantomData
+            };
+        }
+
         debug_assert!(!list.is_empty());
 
         let mut list = ManuallyDrop::new(list);
@@ -54,6 +77,10 @@ impl<T> NonEmptyList<T> {
     }
 
     fn grow_at_least(&mut self, extra: usize) {
+        if size_of::<T>() == 0 {
+            panic!("unable to increase capacity size for ZST");
+        }
+
         let old_layout = Layout::array::<T>(self.cap.get()).unwrap(); //we allocated with it once lol
 
         let fails_constraints = |cap: NonZeroUsize| -> bool {
@@ -95,6 +122,11 @@ impl<T> NonEmptyList<T> {
     }
 
     pub fn push(&mut self, el: T) {
+        if size_of::<T>() == 0 {
+            self.len = self.len.checked_add(1).unwrap();
+            return;
+        }
+
         if self.len >= self.cap {
             self.grow_at_least(1);
         }
@@ -129,13 +161,13 @@ impl<T> NonEmptyList<T> {
         let currently_at_that_position = unsafe { self.ptr.add(index).read() };
 
         {
-            let src = unsafe { self.ptr.add(index + 1) }.as_ptr();
-            let dst = unsafe { self.ptr.add(index) }.as_ptr();
+            let src = unsafe { self.ptr.add(index + 1) };
+            let dst = unsafe { self.ptr.add(index) };
             let count = current_len - index - 1;
 
             if count > 0 {
                 unsafe {
-                    copy(src, dst, count);
+                    src.copy_to(dst, count);
                 }
             }
         }
@@ -154,24 +186,31 @@ impl<T> NonEmptyList<T> {
             panic!("attempted remove which would make the list empty");
         }
 
-        let currently_at_that_position = unsafe { self.ptr.add(index).read() };
+        let index_ptr = unsafe { self.ptr.add(index) };
+        let was_at_index = unsafe { index_ptr.read() };
 
-        {
-            let src = unsafe { self.ptr.add(current_len - 1) }.as_ptr();
-            let dst = unsafe { self.ptr.add(index) }.as_ptr();
+        if index != current_len - 1 {
+            let src = unsafe { self.ptr.add(current_len - 1) };
+            let dst = index_ptr;
 
             unsafe {
-                copy(src, dst, 1);
+                dst.write(src.read());
             }
         }
 
-        self.len = NonZeroUsize::try_from(current_len - 1).unwrap();
-
-        currently_at_that_position
+        self.len = NonZeroUsize::new(current_len - 1).unwrap();
+        was_at_index
     }
 
     pub fn extend(&mut self, iter: impl IntoIterator<Item = T>) {
         let iter = iter.into_iter();
+
+        if size_of::<T>() == 0 {
+            let mut count = 0;
+            iter.for_each(|_| count += 1);
+            self.len = self.len.checked_add(count).expect("unable to create space for additional ZSTs");
+            return;
+        }
 
         let (min, max) = iter.size_hint();
         match max {
@@ -210,6 +249,31 @@ impl<T> NonEmptyList<T> {
         v.retain_mut(f);
         Self::new(v)
     }
+
+    pub fn first (&self) -> &T {
+        unsafe {
+            self.ptr.as_ref()
+        }
+    }
+
+    pub fn first_mut (&mut self) -> &mut T {
+        unsafe {
+            self.ptr.as_mut()
+        }
+    }
+
+    pub fn last (&self) -> &T {
+        unsafe {
+            self.ptr.add(self.len() - 1).as_ref()
+        }
+    }
+
+    pub fn last_mut (&mut self) -> &mut T {
+        unsafe {
+            self.ptr.add(self.len() - 1).as_mut()
+        }
+    }
+
 }
 
 impl<T> From<NonEmptyList<T>> for Vec<T> {
@@ -228,9 +292,11 @@ impl<T> Drop for NonEmptyList<T> {
                 self.len.get(),
             ));
 
-            let layout =
-                Layout::array::<T>(self.cap.get()).expect("used this alloc to get the allocation");
-            dealloc(self.ptr.as_ptr() as *mut u8, layout);
+            if size_of::<T>() != 0 {
+                let layout =
+                    Layout::array::<T>(self.cap.get()).expect("used this alloc to get the allocation");
+                dealloc(self.ptr.as_ptr() as *mut u8, layout);
+            }
         }
     }
 }
@@ -248,19 +314,32 @@ impl<T> AsMut<[T]> for NonEmptyList<T> {
 
 impl<T: Clone> Clone for NonEmptyList<T> {
     fn clone(&self) -> Self {
+        if size_of::<T>() == 0 {
+            return Self {
+                ptr: NonNull::dangling(),
+                len: self.len,
+                cap: NonZeroUsize::new(usize::MAX).unwrap(),
+                _pd: PhantomData
+            };
+        }
+
         let layout = Layout::array::<T>(self.cap.get())
             .expect("unable to create layout for cloning NonEmptyList");
         let ptr = unsafe {
             NonNull::new(alloc(layout) as *mut T).expect("unable to allocate for new NonEmptyList")
         };
 
-        //can't use copy_nonoverlapping because we don't know if it does copy
-        //can't have a separate impl for copy because no specialisation
-        for i in 0..self.len.get() {
-            //safety: we know everything up to len is alloc-ed
+        if needs_drop::<T>() {
+            for i in 0..self.len.get() {
+                //safety: we know everything up to len is alloc-ed
+                unsafe {
+                    let this_idx = self.ptr.add(i).as_ref();
+                    ptr.add(i).write(this_idx.clone());
+                }
+            }
+        } else {
             unsafe {
-                let this_idx = self.ptr.add(i).as_ref();
-                ptr.add(i).write(this_idx.clone());
+                self.ptr.copy_to_nonoverlapping(ptr, self.len.get());
             }
         }
 
@@ -363,6 +442,8 @@ impl<T> AsMut<[T]> for NonEmptyListBuilder<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     #[test]
     fn test_non_empty_list_from_vec() {
@@ -773,4 +854,209 @@ mod tests {
 
         assert_eq!(list.as_ref(), &[1, 12, 3]);
     }
+
+    #[test]
+    fn test_new_with_heap_allocated_structures() {
+        let vec = vec![Rc::new(1), Rc::new(2), Rc::new(3)];
+        let list = NonEmptyList::new(vec).unwrap();
+
+        // Verify all elements are accessible
+        assert_eq!(*list[0], 1);
+        assert_eq!(*list[1], 2);
+        assert_eq!(*list[2], 3);
+
+        // Dropping the list should release all references
+        let element = list.into_iter().next().unwrap();
+        assert_eq!(Rc::strong_count(&element), 1);
+    }
+
+    #[test]
+    fn test_single_element_with_heap_allocated_structure() {
+        let element = Rc::new(42);
+        let list = NonEmptyList::single_element(element.clone());
+
+        // Verify the element is present and reference count is correct
+        assert_eq!(*list[0], 42);
+        assert_eq!(Rc::strong_count(&element), 2);
+
+        // Dropping the list should decrease the reference count
+        drop(list);
+        assert_eq!(Rc::strong_count(&element), 1);
+    }
+
+    #[test]
+    fn test_clone_with_heap_allocated_structures() {
+        let vec = vec![Rc::new(1), Rc::new(2)];
+        let list = NonEmptyList::new(vec).unwrap();
+        let cloned_list = list.clone();
+
+        // Verify both lists contain the same elements
+        assert_eq!(*list[0], 1);
+        assert_eq!(*list[1], 2);
+        assert_eq!(*cloned_list[0], 1);
+        assert_eq!(*cloned_list[1], 2);
+
+        // Verify reference counts
+        assert_eq!(Rc::strong_count(&list[0]), 2);
+        assert_eq!(Rc::strong_count(&list[1]), 2);
+
+        // Dropping one list should not affect the other
+        drop(list);
+        assert_eq!(Rc::strong_count(&cloned_list[0]), 1);
+        assert_eq!(Rc::strong_count(&cloned_list[1]), 1);
+    }
+
+    #[derive(Clone)]
+    struct DropNotifier(Rc<RefCell<usize>>);
+    impl Drop for DropNotifier {
+        fn drop(&mut self) {
+            *self.0.borrow_mut() += 1;
+        }
+    }
+
+
+    #[test]
+    fn test_drop_behavior_with_refcell() {
+        let drop_count = Rc::new(RefCell::new(0));
+
+        let vec = vec![
+            DropNotifier(drop_count.clone()),
+            DropNotifier(drop_count.clone()),
+            DropNotifier(drop_count.clone()),
+        ];
+
+        let list = NonEmptyList::new(vec).unwrap();
+        assert_eq!(*drop_count.borrow(), 0); // No elements dropped yet
+
+        drop(list);
+        assert_eq!(*drop_count.borrow(), 3); // All elements dropped
+    }
+
+    #[test]
+    fn test_clone_behavior_with_refcell() {
+        let drop_count = Rc::new(RefCell::new(0));
+
+        let vec = vec![
+            DropNotifier(drop_count.clone()),
+            DropNotifier(drop_count.clone()),
+        ];
+
+        let list = NonEmptyList::new(vec).unwrap();
+        let cloned_list = list.clone();
+
+        assert_eq!(*drop_count.borrow(), 0); // No elements dropped yet
+
+        drop(list);
+        assert_eq!(*drop_count.borrow(), 2); // Cloned list still holds references
+
+        drop(cloned_list);
+        assert_eq!(*drop_count.borrow(), 4); // All elements dropped
+    }
+
+    #[derive(Debug, PartialEq, Eq, Clone)]
+    struct ZST;
+
+    #[test]
+    fn test_new_with_zst() {
+        let vec = vec![ZST, ZST, ZST];
+        let list = NonEmptyList::new(vec).unwrap();
+
+        // Check the length and elements
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.as_ref(), &[ZST, ZST, ZST]);
+    }
+
+    #[test]
+    fn test_push_with_zst() {
+        let mut list = NonEmptyList::single_element(ZST);
+
+        // Push more ZST elements
+        list.push(ZST);
+        list.push(ZST);
+
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.as_ref(), &[ZST, ZST, ZST]);
+    }
+
+    #[test]
+    fn test_extend_with_zst() {
+        let mut list = NonEmptyList::single_element(ZST);
+
+        // Extend with more ZST elements
+        list.extend(vec![ZST, ZST, ZST]);
+
+        assert_eq!(list.len(), 4);
+        assert_eq!(list.as_ref(), &[ZST, ZST, ZST, ZST]);
+    }
+
+    #[test]
+    fn test_remove_with_zst() {
+        let vec = vec![ZST, ZST, ZST];
+        let mut list = NonEmptyList::new(vec).unwrap();
+
+        // Remove an element
+        list.remove(1);
+
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.as_ref(), &[ZST, ZST]);
+    }
+
+    #[test]
+    fn test_swap_remove_with_zst() {
+        let vec = vec![ZST, ZST, ZST];
+        let mut list = NonEmptyList::new(vec).unwrap();
+
+        // Swap-remove an element
+        list.swap_remove(0);
+
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.as_ref(), &[ZST, ZST]);
+    }
+
+    #[test]
+    fn test_clone_with_zst() {
+        let vec = vec![ZST, ZST, ZST];
+        let list = NonEmptyList::new(vec).unwrap();
+
+        let cloned_list = list.clone();
+
+        // Check both lists contain the same elements
+        assert_eq!(list.len(), 3);
+        assert_eq!(cloned_list.len(), 3);
+        assert_eq!(list.as_ref(), cloned_list.as_ref());
+    }
+
+    #[test]
+    fn test_retain_mut_with_zst() {
+        let vec = vec![ZST, ZST, ZST];
+        let mut list = NonEmptyList::new(vec).unwrap();
+
+        // Retain only the first element (dummy condition for ZSTs)
+        let mut count = 0;
+        list = list.retain(|_| {
+            count += 1;
+            count == 1
+        }).unwrap();
+
+        assert_eq!(list.len(), 1);
+        assert_eq!(list.as_ref(), &[ZST]);
+    }
+
+    #[test]
+    fn test_index_and_index_mut_with_zst() {
+        let vec = vec![ZST, ZST, ZST];
+        let mut list = NonEmptyList::new(vec).unwrap();
+
+        // Access elements
+        assert_eq!(list[0], ZST);
+        assert_eq!(list[1], ZST);
+
+        // Mutate elements (no-op for ZSTs)
+        list[0] = ZST;
+        list[1] = ZST;
+
+        assert_eq!(list[0], ZST);
+        assert_eq!(list[1], ZST);
+    }
 }
+
