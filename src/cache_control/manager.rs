@@ -5,7 +5,7 @@ use s3::Bucket;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    fmt::{Display, Formatter, Write},
+    fmt::{Display, Formatter},
     sync::Arc,
 };
 use tokio::sync::{Mutex, RwLock};
@@ -34,29 +34,21 @@ impl Display for Directive {
 }
 
 impl Directive {
-    pub fn directives_to_header(directives: Vec<Directive>) -> Option<String> {
-        if directives.is_empty() {
-            return None;
-        }
-
+    pub fn directives_to_header(directives: NonEmptyList<Directive>) -> String {
         let mut output = String::default();
 
         let mut is_first = true;
         for directive in directives {
             if is_first {
                 is_first = false;
-            } else if let Err(e) = write!(output, ", ") {
-                error!(?e, "Error writing comma to cache control header");
-                return None;
+            } else {
+                output.push_str(", ");
             }
 
-            if let Err(e) = write!(output, "{directive}") {
-                error!(?e, "Error writing {directive:?} to cache control header");
-                return None;
-            }
+            output.push_str(&directive.to_string());
         }
 
-        Some(output)
+        output
     }
 
     pub fn get_from_stdin(theme: &dyn Theme) -> color_eyre::Result<Self> {

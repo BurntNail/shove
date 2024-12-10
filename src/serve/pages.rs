@@ -14,6 +14,7 @@ use s3::{error::S3Error, Bucket};
 use serde_json::from_slice;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{Mutex, RwLock};
+use crate::non_empty_list::NonEmptyList;
 
 #[derive(Clone)]
 pub struct Pages {
@@ -253,7 +254,9 @@ impl PageOutput {
             .header(header::CONTENT_TYPE, self.content_type)
             .header(header::CONTENT_LENGTH, self.content.len());
 
-        if let Some(cc) = Directive::directives_to_header(self.cache_control) {
+
+
+        if let Some(cc) = NonEmptyList::new(self.cache_control).map(Directive::directives_to_header) {
             builder = builder.header(header::CACHE_CONTROL, cc);
         }
 

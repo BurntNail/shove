@@ -220,9 +220,8 @@ impl AuthStorer {
 
     pub fn get_users_with_access_to_realm(&self, pat: &Realm) -> Vec<Uuid> {
         self.realms
-            .iter()
-            .find(|(this_pat, _)| this_pat == &pat)
-            .map(|(_, uuids)| Vec::from(uuids.clone()))
+            .get(pat)
+            .map(|uuids| Vec::from(uuids.clone()))
             .unwrap_or_default()
     }
 
