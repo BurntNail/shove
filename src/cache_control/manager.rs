@@ -35,20 +35,7 @@ impl Display for Directive {
 
 impl Directive {
     pub fn directives_to_header(directives: NonEmptyList<Directive>) -> String {
-        let mut output = String::default();
-
-        let mut is_first = true;
-        for directive in directives {
-            if is_first {
-                is_first = false;
-            } else {
-                output.push_str(", ");
-            }
-
-            output.push_str(&directive.to_string());
-        }
-
-        output
+        directives.into_iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", ")
     }
 
     pub fn get_from_stdin(theme: &dyn Theme) -> color_eyre::Result<Self> {
