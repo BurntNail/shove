@@ -33,9 +33,13 @@ impl<T> NonEmptyList<T> {
         }
 
         let layout = Layout::array::<T>(1).expect("unable to create layout for single element");
+        //safety: we know it's uninit and we use the length
+        //safety: we know we're not dealing with ZSTs
         let ptr = unsafe {
             NonNull::new(alloc(layout) as *mut T).expect("unable to allocate space for single element")
         };
+        debug_assert!(ptr.is_aligned());
+        //safety: dst is valid and aligned
         unsafe {
             ptr.write(el);
         }
@@ -64,6 +68,10 @@ impl<T> NonEmptyList<T> {
 
         let mut list = ManuallyDrop::new(list);
 
+        debug_assert!(list.len() > 0);
+        debug_assert!(list.capacity() > 0);
+
+        //safety: we know the list isn't empty so the capacity and length are >0, and the pointer is not null
         let len = NonZeroUsize::new_unchecked(list.len());
         let cap = NonZeroUsize::new_unchecked(list.capacity());
         let ptr = NonNull::new_unchecked(list.as_mut_ptr());
@@ -76,10 +84,12 @@ impl<T> NonEmptyList<T> {
         }
     }
 
-    fn grow_at_least(&mut self, extra: usize) {
+    ///NB: must not be called with ZSTs
+    fn grow_at_least(&mut self, extra: NonZeroUsize) {
         if size_of::<T>() == 0 {
             panic!("unable to increase capacity size for ZST");
         }
+        let extra = extra.get();
 
         let old_layout = Layout::array::<T>(self.cap.get()).unwrap(); //we allocated with it once lol
 
@@ -108,6 +118,10 @@ impl<T> NonEmptyList<T> {
             .unwrap_or(min_cap);
 
         //new_size is in bytes, so have to multiply by size_of T
+        //safety: this program uses the global allocator
+        //safety: same layout because we used the old capacity to generate it
+        //safety: new size is > 0 because we added some positive number to it, and then probably made it bigger
+        //safety: no overflowing isize::MAX
         let new_ptr = NonNull::new(unsafe {
             realloc(
                 self.ptr.as_ptr() as *mut u8,
@@ -128,17 +142,17 @@ impl<T> NonEmptyList<T> {
         }
 
         if self.len >= self.cap {
-            self.grow_at_least(1);
+            self.grow_at_least(NonZeroUsize::new(1).unwrap());
         }
 
         debug_assert!(self.len < self.cap);
 
         //safety: we know we've allocated enough
-        //safety: we know cap is bigger so len + 1 will fit
         unsafe {
             self.ptr.add(self.len.get()).write(el);
-            self.len = self.len.checked_add(1).unwrap_unchecked();
         }
+
+        self.len = self.len.checked_add(1).unwrap();
     }
 
     pub fn len(&self) -> usize {
@@ -158,17 +172,22 @@ impl<T> NonEmptyList<T> {
             panic!("attempted remove which would make the list empty");
         }
 
+        //safety: checked for index vs current len so we know we have memory at that location
         let currently_at_that_position = unsafe { self.ptr.add(index).read() };
 
-        {
+        if index != current_len - 1 {
+            //safety: index+1 < current_len, so we know the memory is initialised
             let src = unsafe { self.ptr.add(index + 1) };
+            //safety: src is fine so dst is also fine
             let dst = unsafe { self.ptr.add(index) };
             let count = current_len - index - 1;
 
-            if count > 0 {
-                unsafe {
-                    src.copy_to(dst, count);
-                }
+            debug_assert!(src.is_aligned());
+            debug_assert!(dst.is_aligned());
+
+            //safety: both ptrs are valid and aligned
+            unsafe {
+                src.copy_to(dst, count);
             }
         }
 
@@ -186,14 +205,22 @@ impl<T> NonEmptyList<T> {
             panic!("attempted remove which would make the list empty");
         }
 
+        //safety: checked vs current len so fine
         let index_ptr = unsafe { self.ptr.add(index) };
+        debug_assert!(index_ptr.is_aligned());
+        //safety: valid & aligned from above
         let was_at_index = unsafe { index_ptr.read() };
 
         if index != current_len - 1 {
+            //safety: current_len - 1 is the last valid ptr
             let src = unsafe { self.ptr.add(current_len - 1) };
             let dst = index_ptr;
 
+            debug_assert!(src.is_aligned());
+            debug_assert!(dst.is_aligned());
+
             unsafe {
+                //safety: both are aligned & valid
                 dst.write(src.read());
             }
         }
@@ -213,23 +240,33 @@ impl<T> NonEmptyList<T> {
         }
 
         let (min, max) = iter.size_hint();
+        let (min, max) = (NonZeroUsize::new(min), max.and_then(NonZeroUsize::new));
         match max {
             Some(max) => self.grow_at_least(max),
-            None => self.grow_at_least(min),
+            None => if let Some(min) = min {
+                self.grow_at_least(min);
+            }
         }
 
         for el in iter {
-            //gotta love unreliable size hints
+            //love unreliable size hints
             if self.len == self.cap {
-                self.grow_at_least(1);
+                self.grow_at_least(NonZeroUsize::new(1).unwrap());
             }
 
             debug_assert!(self.len < self.cap);
 
             unsafe {
-                self.ptr.add(self.len.get()).write(el);
-                self.len = self.len.checked_add(1).unwrap_unchecked();
+                //safety: just made sure we had space for it, so valid
+                let dst = self.ptr.add(self.len.get());
+
+                debug_assert!(dst.is_aligned());
+
+                //safety: dst is valid and aligned
+                dst.write(el);
             }
+
+            self.len = self.len.checked_add(1).unwrap();
         }
     }
 
@@ -241,6 +278,7 @@ impl<T> NonEmptyList<T> {
         self.as_mut().iter_mut()
     }
 
+    ///NB: returns an option because if the retain keeps no elements, then it wouldn't be valid
     pub fn retain<F>(self, f: F) -> Option<Self>
     where
         F: FnMut(&mut T) -> bool,
@@ -251,25 +289,45 @@ impl<T> NonEmptyList<T> {
     }
 
     pub fn first (&self) -> &T {
+        debug_assert!(self.ptr.is_aligned());
+
         unsafe {
+            //safety: we always know that the first element is valid
+            //safety: and aligned/nonnull
+            //safety: we follow aliasing rules because of the reference to self
             self.ptr.as_ref()
         }
     }
 
     pub fn first_mut (&mut self) -> &mut T {
+        debug_assert!(self.ptr.is_aligned());
+
         unsafe {
+            //safety: we always know that the first element is valid
+            //safety: and aligned/nonnull
+            //safety: we follow aliasing rules because of the reference to self
             self.ptr.as_mut()
         }
     }
 
     pub fn last (&self) -> &T {
+        debug_assert!(self.ptr.is_aligned());
+
         unsafe {
+            //safety: we know that self.len() >= 1, so it can't underflow and it also has to be valid
+            //safety: and aligned/nonnull
+            //safety: we follow aliasing rules because of the reference to self
             self.ptr.add(self.len() - 1).as_ref()
         }
     }
 
     pub fn last_mut (&mut self) -> &mut T {
+        debug_assert!(self.ptr.is_aligned());
+
         unsafe {
+            //safety: we know that self.len() >= 1, so it can't underflow and it also has to be valid
+            //safety: and aligned/nonnull
+            //safety: we follow aliasing rules because of the reference to self
             self.ptr.add(self.len() - 1).as_mut()
         }
     }
@@ -278,7 +336,17 @@ impl<T> NonEmptyList<T> {
 
 impl<T> From<NonEmptyList<T>> for Vec<T> {
     fn from(value: NonEmptyList<T>) -> Self {
+        debug_assert!(value.len() <= value.capacity());
+        debug_assert!((value.capacity() * size_of::<T>()) <= (isize::MAX as usize));
+
         let md = ManuallyDrop::new(value);
+        //safety: we either got it from the global alloc, or a vec
+        //safety: T has same alignment as ptr
+        //safety: T * capacity is the same as the allocation
+        //safety: len <= cap
+        //safety: up to len is init
+        //safety: initally allocated with cap
+        //safety: alloc-ed size is not > isize::MAX
         unsafe { Vec::from_raw_parts(md.ptr.as_ptr(), md.len.get(), md.cap.get()) }
     }
 }
@@ -525,7 +593,7 @@ mod tests {
     fn test_grow_beyond_limits() {
         let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec![1]) };
 
-        list.grow_at_least(usize::MAX); // Should panic due to memory constraints
+        list.grow_at_least(NonZeroUsize::new(usize::MAX).unwrap()); // Should panic due to memory constraints
     }
 
     #[test]
@@ -607,15 +675,6 @@ mod tests {
         assert_eq!(list.len.get(), 1000);
         assert_eq!(list.as_ref()[0], 1);
         assert_eq!(list.as_ref()[999], 1000);
-    }
-
-    #[test]
-    #[should_panic(expected = "unable to create large enough list")]
-    fn test_push_beyond_max_capacity() {
-        let mut list = unsafe { NonEmptyList::from_non_empty_vec(vec![1]) };
-
-        // Try pushing to the maximum possible capacity, which should panic
-        list.grow_at_least(usize::MAX);
     }
 
     #[test]
