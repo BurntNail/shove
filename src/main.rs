@@ -1,14 +1,16 @@
 use crate::{cache_control::cache, protect::protect, serve::serve, upload::upload};
 use color_eyre::owo_colors::OwoColorize;
+use dialoguer::{theme::Theme, FuzzySelect, Input};
 use dotenvy::var;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, env::args};
-use std::fmt::{Display, Formatter};
-use std::hash::{Hash, Hasher};
-use dialoguer::{FuzzySelect, Input};
-use dialoguer::theme::Theme;
-use regex::Regex;
+use std::{
+    collections::HashMap,
+    env::args,
+    fmt::{Display, Formatter},
+    hash::{Hash, Hasher},
+};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 pub fn hash_raw_bytes(bytes: impl AsRef<[u8]>) -> Vec<u8> {
@@ -59,7 +61,7 @@ impl Realm {
         }
     }
 
-    pub fn get_from_stdin (theme: &dyn Theme) -> color_eyre::Result<Self> {
+    pub fn get_from_stdin(theme: &dyn Theme) -> color_eyre::Result<Self> {
         let ty = FuzzySelect::with_theme(theme)
             .items(&["Starts With", "Ends With", "Regex", "Contains"])
             .with_prompt("What kind of realm matcher?")
@@ -67,22 +69,30 @@ impl Realm {
 
         match ty {
             0 => {
-                let sw = Input::with_theme(theme).with_prompt("What should the path start with?").interact()?;
+                let sw = Input::with_theme(theme)
+                    .with_prompt("What should the path start with?")
+                    .interact()?;
                 Ok(Self::StartsWith(sw))
-            },
+            }
             1 => {
-                let ew = Input::with_theme(theme).with_prompt("What should the path end with?").interact()?;
+                let ew = Input::with_theme(theme)
+                    .with_prompt("What should the path end with?")
+                    .interact()?;
                 Ok(Self::StartsWith(ew))
             }
             2 => {
-                let regex = Input::with_theme(theme).with_prompt("What should the regular expression match on?").interact()?;
+                let regex = Input::with_theme(theme)
+                    .with_prompt("What should the regular expression match on?")
+                    .interact()?;
                 Ok(Self::Regex(regex))
-            },
+            }
             3 => {
-                let ew = Input::with_theme(theme).with_prompt("What should the path contain?").interact()?;
+                let ew = Input::with_theme(theme)
+                    .with_prompt("What should the path contain?")
+                    .interact()?;
                 Ok(Self::Contains(ew))
             }
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 }
@@ -110,7 +120,7 @@ impl PartialEq for Realm {
             (Realm::Contains(s), Realm::Contains(o)) => s.eq(o),
             //could technically turn the sw/ew into a regex, but again, no
             //that'd also break the hash/partialeq invariant
-            (_, _) => false
+            (_, _) => false,
         }
     }
 }

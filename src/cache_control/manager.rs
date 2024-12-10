@@ -35,7 +35,11 @@ impl Display for Directive {
 
 impl Directive {
     pub fn directives_to_header(directives: NonEmptyList<Directive>) -> String {
-        directives.into_iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", ")
+        directives
+            .into_iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     pub fn get_from_stdin(theme: &dyn Theme) -> color_eyre::Result<Self> {
@@ -196,6 +200,8 @@ impl Caching {
         from_map
     }
 
+    #[allow(clippy::mutable_key_type)]
+    //the hash impl uses `as_str`, and the mutable part isn't involved with that - iirc it's a cache
     pub fn get_all_caching_rules(&self) -> HashMap<Realm, NonEmptyList<Directive>> {
         self.overrides.clone()
     }
