@@ -1,7 +1,6 @@
 use crate::{
-    hash_raw_bytes,
-    protect::auth_storer::{AuthStorer, Realm},
-    serve::empty_with_code,
+    hash_raw_bytes, non_empty_list::NonEmptyList, protect::auth_storer::AuthStorer,
+    s3::get_bytes_or_default, serve::empty_with_code, Realm,
 };
 use argon2::{
     password_hash::{Error, SaltString},
@@ -70,7 +69,7 @@ impl AuthChecker {
             bail!("already reloading auth")
         };
 
-        let current_enc_bytes = AuthStorer::get_encrypted_bytes(bucket).await?;
+        let current_enc_bytes = get_bytes_or_default(bucket, AUTH_DATA_LOCATION).await?;
         let hashed = hash_raw_bytes(&current_enc_bytes);
 
         if *last_hash == hashed {
@@ -85,6 +84,7 @@ impl AuthChecker {
         Ok(())
     }
 
+    //technically unused, but maybe?
     pub async fn save_to_s3(&self, bucket: &Bucket) -> color_eyre::Result<()> {
         self.auth.read().await.save(bucket).await
     }
@@ -117,11 +117,11 @@ impl AuthChecker {
         self.auth.write().await.add_user(username, password)
     }
 
-    pub async fn protect(&self, pattern: Realm, uuids: Vec<Uuid>) {
+    pub async fn protect(&self, pattern: Realm, uuids: NonEmptyList<Uuid>) {
         self.auth.write().await.protect(pattern, uuids);
     }
 
-    pub async fn protect_additional(&self, pattern: Realm, uuids: Vec<Uuid>) {
+    pub async fn protect_additional(&self, pattern: Realm, uuids: NonEmptyList<Uuid>) {
         self.auth.write().await.protect_additional(pattern, uuids);
     }
 

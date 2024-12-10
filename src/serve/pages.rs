@@ -1,14 +1,20 @@
 use crate::{
-    hash_raw_bytes, s3::UPLOAD_DATA_LOCATION, serve::livereload::LiveReloader, UploadData,
+    cache_control::manager::{CacheControlManager, Directive},
+    hash_raw_bytes,
+    s3::UPLOAD_DATA_LOCATION,
+    serve::livereload::LiveReloader,
+    UploadData,
 };
 use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
-use hyper::StatusCode;
+use http_body_util::Full;
+use hyper::{body::Bytes, header, http, Method, Response, StatusCode};
 use moka::future::{Cache, CacheBuilder};
 use s3::{error::S3Error, Bucket};
 use serde_json::from_slice;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{Mutex, RwLock};
+use crate::non_empty_list::NonEmptyList;
 
 #[derive(Clone)]
 pub struct Pages {
@@ -175,27 +181,49 @@ impl Pages {
         Ok(())
     }
 
-    pub async fn get(&self, bucket: &Bucket, path: &str) -> Option<(Vec<u8>, String, StatusCode)> {
+    pub async fn get(
+        &self,
+        bucket: &Bucket,
+        path: &str,
+        ccm: &CacheControlManager,
+    ) -> Option<PageOutput> {
         let root = self.upload_data.read().await.clone().root;
         let path = format!("{root}{path}");
 
         let not_found = || async {
             let (content, content_type) = self.cache.get(&format!("{root}/404.html")).await?;
-            Some((content, content_type, StatusCode::NOT_FOUND))
+            Some(PageOutput {
+                content,
+                cache_control: vec![Directive::MaxAge(604800)],
+                content_type,
+                status: StatusCode::NOT_FOUND,
+            })
         };
 
-        if let Some((c, ct)) = self.cache.get(&path).await {
-            return Some((c, ct, StatusCode::OK));
+        if let Some((content, content_type)) = self.cache.get(&path).await {
+            let cache_control = ccm.get_directives(&path).await;
+            return Some(PageOutput {
+                content,
+                content_type,
+                cache_control,
+                status: StatusCode::OK,
+            });
         }
 
         match self.upload_data.read().await.entries.get(&path) {
             Some(_hash) => match Self::read_file_from_s3(path.clone(), bucket).await {
-                Ok((bytes, content_type, path)) => {
+                Ok((content, content_type, path)) => {
                     info!(?path, "Adding to cache");
                     self.cache
-                        .insert(path, (bytes.clone(), content_type.clone()))
+                        .insert(path.clone(), (content.clone(), content_type.clone()))
                         .await;
-                    Some((bytes, content_type, StatusCode::OK))
+                    let cache_control = ccm.get_directives(&path).await;
+                    Some(PageOutput {
+                        content,
+                        content_type,
+                        cache_control,
+                        status: StatusCode::OK,
+                    })
                 }
                 Err(e) => {
                     warn!(
@@ -208,6 +236,34 @@ impl Pages {
                 }
             },
             None => not_found().await,
+        }
+    }
+}
+
+pub struct PageOutput {
+    content: Vec<u8>,
+    cache_control: Vec<Directive>,
+    content_type: String,
+    status: StatusCode,
+}
+
+impl PageOutput {
+    pub fn into_response(self, req_method: &Method) -> http::Result<Response<Full<Bytes>>> {
+        let mut builder = Response::builder()
+            .status(self.status)
+            .header(header::CONTENT_TYPE, self.content_type)
+            .header(header::CONTENT_LENGTH, self.content.len());
+
+
+
+        if let Some(cc) = NonEmptyList::new(self.cache_control).map(Directive::directives_to_header) {
+            builder = builder.header(header::CACHE_CONTROL, cc);
+        }
+
+        if req_method == Method::HEAD {
+            Ok(builder.body(Full::default())?)
+        } else {
+            Ok(builder.body(Full::new(Bytes::from(self.content)))?)
         }
     }
 }

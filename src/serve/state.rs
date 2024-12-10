@@ -1,9 +1,13 @@
 use crate::{
+    cache_control::manager::CacheControlManager,
     protect::auth::{AuthChecker, AuthReturn},
     s3::get_bucket,
-    serve::{livereload::LiveReloader, pages::Pages},
+    serve::{
+        livereload::LiveReloader,
+        pages::{PageOutput, Pages},
+    },
 };
-use hyper::{body::Incoming, Request, StatusCode};
+use hyper::{body::Incoming, Request};
 use s3::Bucket;
 use std::{env, net::SocketAddr, sync::Arc};
 
@@ -14,6 +18,7 @@ pub struct State {
     pages: Pages,
     live_reloader: LiveReloader,
     auth: AuthChecker,
+    cache_control_manager: CacheControlManager,
 }
 
 impl State {
@@ -27,6 +32,7 @@ impl State {
 
         let live_reloader = LiveReloader::new();
         let auth = AuthChecker::new(&bucket).await?;
+        let cache_control_manager = CacheControlManager::new(&bucket).await?;
 
         let tigris_token = env::var("TIGRIS_TOKEN").ok().map(|x| x.into());
         if tigris_token.is_some() {
@@ -41,6 +47,7 @@ impl State {
             tigris_token,
             live_reloader,
             auth,
+            cache_control_manager,
         }))
     }
 
@@ -62,13 +69,18 @@ impl State {
         {
             error!(?e, "Error reloading pages")
         }
+        if let Err(e) = self.cache_control_manager.check_and_reload(&self.bucket).await {
+            error!(?e, "Error reloading cache control manager");
+        }
 
         Ok(())
     }
 
     #[instrument(skip(self))]
-    pub async fn get(&self, path: &str) -> Option<(Vec<u8>, String, StatusCode)> {
-        self.pages.get(&self.bucket, path).await
+    pub async fn get(&self, path: &str) -> Option<PageOutput> {
+        self.pages
+            .get(&self.bucket, path, &self.cache_control_manager)
+            .await
     }
 
     pub async fn check_auth(

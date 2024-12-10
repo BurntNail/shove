@@ -1,4 +1,4 @@
-use crate::{protect::protect, serve::serve, upload::upload};
+use crate::{cache_control::cache, protect::protect, serve::serve, upload::upload};
 use color_eyre::owo_colors::OwoColorize;
 use dotenvy::var;
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,8 @@ pub fn hash_raw_bytes(bytes: impl AsRef<[u8]>) -> Vec<u8> {
     hasher.finalize().to_vec()
 }
 
+pub mod cache_control;
+mod non_empty_list;
 pub mod protect;
 pub mod s3;
 pub mod serve;
@@ -19,6 +21,19 @@ mod upload;
 
 #[macro_use]
 extern crate tracing;
+
+#[derive(Serialize, Deserialize, Clone, Hash, Eq, PartialEq, Debug)]
+pub enum Realm {
+    StartsWith(String),
+}
+
+impl Realm {
+    pub fn matches(&self, path: &str) -> bool {
+        match self {
+            Self::StartsWith(pattern) => path.starts_with(pattern),
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, Eq, PartialEq)]
 pub struct UploadData {
@@ -68,6 +83,7 @@ pub enum Args {
     Serve,
     Upload(String),
     Protect,
+    Cache,
 }
 
 impl Args {
@@ -90,10 +106,14 @@ impl Args {
                 "protect" => {
                     return Self::Protect;
                 }
+                "cache" => {
+                    return Self::Cache;
+                }
                 _ => {}
             }
         }
 
+        //could do it all in one, but this way is easier if i want colours
         eprintln!(
             "{} is a command-line utility to upload to and serve from S3 buckets",
             "shove".bold()
@@ -109,6 +129,7 @@ impl Args {
         eprintln!("- {}", "serve".italic());
         eprintln!("- {} {}", "upload".italic(), "[DIR]".blue());
         eprintln!("- {}", "protect".italic());
+        eprintln!("- {}", "cache".italic());
         eprintln!();
         eprintln!("`{}` command", "serve".italic());
         eprintln!(
@@ -135,6 +156,10 @@ impl Args {
             "  Asks the user for a directory to protect, and the username/password combo to protect it",
         );
         eprintln!("  eg. `{}`", "shove protect".cyan());
+        eprintln!();
+        eprintln!("`{}` command", "cache".italic());
+        eprintln!("  Modifies the cache control headers on files",);
+        eprintln!("  eg. `{}`", "shove cache".cyan());
         eprintln!();
         eprintln!("{}", "Environment Variables".underline());
         eprintln!(
@@ -217,5 +242,10 @@ fn main() {
                 }
             });
         }
+        Args::Cache => runtime.block_on(async move {
+            if let Err(e) = cache().await {
+                error!(?e, "Error caching");
+            }
+        }),
     }
 }
