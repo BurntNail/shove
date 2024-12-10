@@ -27,9 +27,12 @@ mod upload;
 #[macro_use]
 extern crate tracing;
 
+extern crate serde_regex;
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Realm {
     StartsWith(String),
+    #[serde(with = "serde_regex")]
     Regex(Regex),
     EndsWith(String),
     Contains(String),
