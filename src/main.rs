@@ -31,13 +31,17 @@ extern crate tracing;
 pub enum Realm {
     StartsWith(String),
     Regex(Regex),
+    EndsWith(String),
+    Contains(String),
 }
 
 impl Display for Realm {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Realm::StartsWith(sw) => write!(f, "Starts with: {sw:?}"),
+            Realm::EndsWith(ew) => write!(f, "Ends with: {ew:?}"),
             Realm::Regex(regex) => write!(f, "Matches Regex: {regex}"),
+            Realm::Contains(cont) => write!(f, "Contains: {cont:?}"),
         }
     }
 }
@@ -46,13 +50,15 @@ impl Realm {
     pub fn matches(&self, path: &str) -> bool {
         match self {
             Self::StartsWith(pattern) => path.starts_with(pattern),
+            Self::EndsWith(ew) => path.ends_with(ew),
             Self::Regex(regex) => regex.is_match(path),
+            Self::Contains(cont) => path.contains(cont),
         }
     }
 
     pub fn get_from_stdin (theme: &dyn Theme) -> color_eyre::Result<Self> {
         let ty = FuzzySelect::with_theme(theme)
-            .items(&["Starts With", "Regex"])
+            .items(&["Starts With", "Ends With", "Regex", "Contains"])
             .with_prompt("What kind of realm matcher?")
             .interact()?;
 
@@ -62,8 +68,16 @@ impl Realm {
                 Ok(Self::StartsWith(sw))
             },
             1 => {
+                let ew = Input::with_theme(theme).with_prompt("What should the path end with?").interact()?;
+                Ok(Self::StartsWith(ew))
+            }
+            2 => {
                 let regex = Input::with_theme(theme).with_prompt("What should the regular expression match on?").interact()?;
                 Ok(Self::Regex(regex))
+            },
+            3 => {
+                let ew = Input::with_theme(theme).with_prompt("What should the path contain?").interact()?;
+                Ok(Self::Contains(ew))
             }
             _ => unreachable!()
         }
@@ -75,7 +89,9 @@ impl Hash for Realm {
         std::mem::discriminant(self).hash(state);
         match self {
             Realm::StartsWith(sw) => sw.hash(state),
+            Realm::EndsWith(ew) => ew.hash(state),
             Realm::Regex(reg) => reg.as_str().hash(state),
+            Realm::Contains(cont) => cont.hash(state),
         }
     }
 }
@@ -84,10 +100,12 @@ impl PartialEq for Realm {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Realm::StartsWith(s), Realm::StartsWith(o)) => s.eq(o),
+            (Realm::EndsWith(s), Realm::EndsWith(o)) => s.eq(o),
             //technically not comprehensive but i'm not dealing with that mess lolll
             //also that would break the hash/partialeq invariant
             (Realm::Regex(s), Realm::Regex(o)) => s.as_str().eq(o.as_str()),
-            //could technically turn the sw into a regex, but again, no
+            (Realm::Contains(s), Realm::Contains(o)) => s.eq(o),
+            //could technically turn the sw/ew into a regex, but again, no
             //that'd also break the hash/partialeq invariant
             (_, _) => false
         }
