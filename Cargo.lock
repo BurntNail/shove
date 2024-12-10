@@ -2152,6 +2152,7 @@ dependencies = [
  "moka",
  "new_mime_guess",
  "path-clean",
+ "regex",
  "rust-s3",
  "sentry",
  "serde",

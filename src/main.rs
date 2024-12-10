@@ -5,8 +5,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, env::args};
 use std::fmt::{Display, Formatter};
+use std::hash::{Hash, Hasher};
 use dialoguer::{FuzzySelect, Input};
 use dialoguer::theme::Theme;
+use regex::Regex;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 pub fn hash_raw_bytes(bytes: impl AsRef<[u8]>) -> Vec<u8> {
@@ -25,15 +27,17 @@ mod upload;
 #[macro_use]
 extern crate tracing;
 
-#[derive(Serialize, Deserialize, Clone, Hash, Eq, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Realm {
-    StartsWith(String)
+    StartsWith(String),
+    Regex(Regex),
 }
 
 impl Display for Realm {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Realm::StartsWith(sw) => write!(f, "Starts with: {sw:?}"),
+            Realm::Regex(regex) => write!(f, "Matches Regex: {regex}"),
         }
     }
 }
@@ -42,12 +46,13 @@ impl Realm {
     pub fn matches(&self, path: &str) -> bool {
         match self {
             Self::StartsWith(pattern) => path.starts_with(pattern),
+            Self::Regex(regex) => regex.is_match(path),
         }
     }
 
     pub fn get_from_stdin (theme: &dyn Theme) -> color_eyre::Result<Self> {
         let ty = FuzzySelect::with_theme(theme)
-            .items(&["Starts With"])
+            .items(&["Starts With", "Regex"])
             .with_prompt("What kind of realm matcher?")
             .interact()?;
 
@@ -56,10 +61,40 @@ impl Realm {
                 let sw = Input::with_theme(theme).with_prompt("What should the path start with?").interact()?;
                 Ok(Self::StartsWith(sw))
             },
+            1 => {
+                let regex = Input::with_theme(theme).with_prompt("What should the regular expression match on?").interact()?;
+                Ok(Self::Regex(regex))
+            }
             _ => unreachable!()
         }
     }
 }
+
+impl Hash for Realm {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Realm::StartsWith(sw) => sw.hash(state),
+            Realm::Regex(reg) => reg.as_str().hash(state),
+        }
+    }
+}
+
+impl PartialEq for Realm {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Realm::StartsWith(s), Realm::StartsWith(o)) => s.eq(o),
+            //technically not comprehensive but i'm not dealing with that mess lolll
+            //also that would break the hash/partialeq invariant
+            (Realm::Regex(s), Realm::Regex(o)) => s.as_str().eq(o.as_str()),
+            //could technically turn the sw into a regex, but again, no
+            //that'd also break the hash/partialeq invariant
+            (_, _) => false
+        }
+    }
+}
+
+impl Eq for Realm {}
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, Eq, PartialEq)]
 pub struct UploadData {
