@@ -64,7 +64,7 @@ async fn shutdown_signal(reload_stop: Reloader) {
 }
 
 pub async fn serve() -> color_eyre::Result<()> {
-    let port = var("PORT").expect("expected env var PORT");
+    let port = var("PORT").unwrap_or_else(|_| "8080".into());
     let addr: SocketAddr = format!("0.0.0.0:{port}")
         .parse()
         .expect("expected valid socket address to result from env var PORT");

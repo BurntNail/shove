@@ -258,7 +258,7 @@ impl Args {
             "AWS_ENDPOINT_URL_S3".green()
         );
         eprintln!(
-            "{} - the port used for serving the bucket. Not needed if uploading/protecting",
+            "{} - the port used for serving the bucket. Not needed if uploading/protecting. Defaults to 8080",
             "PORT".green()
         );
         eprintln!(
