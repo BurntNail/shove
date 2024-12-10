@@ -48,10 +48,7 @@ pub async fn cache() -> color_eyre::Result<()> {
             caching.save(&bucket).await?;
         }
         2 => {
-            let pat = Input::with_theme(&theme)
-                .with_prompt("What should the path start with?")
-                .interact()?;
-            let pat = Realm::StartsWith(pat);
+            let pat = Realm::get_from_stdin(&theme)?;
             let directives = get_nonempty_directives(&theme)?;
 
             caching.set_directives(pat, directives);

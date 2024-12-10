@@ -4,6 +4,9 @@ use dotenvy::var;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, env::args};
+use std::fmt::{Display, Formatter};
+use dialoguer::{FuzzySelect, Input};
+use dialoguer::theme::Theme;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 pub fn hash_raw_bytes(bytes: impl AsRef<[u8]>) -> Vec<u8> {
@@ -24,13 +27,36 @@ extern crate tracing;
 
 #[derive(Serialize, Deserialize, Clone, Hash, Eq, PartialEq, Debug)]
 pub enum Realm {
-    StartsWith(String),
+    StartsWith(String)
+}
+
+impl Display for Realm {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Realm::StartsWith(sw) => write!(f, "Starts with: {sw:?}"),
+        }
+    }
 }
 
 impl Realm {
     pub fn matches(&self, path: &str) -> bool {
         match self {
             Self::StartsWith(pattern) => path.starts_with(pattern),
+        }
+    }
+
+    pub fn get_from_stdin (theme: &dyn Theme) -> color_eyre::Result<Self> {
+        let ty = FuzzySelect::with_theme(theme)
+            .items(&["Starts With"])
+            .with_prompt("What kind of realm matcher?")
+            .interact()?;
+
+        match ty {
+            0 => {
+                let sw = Input::with_theme(theme).with_prompt("What should the path start with?").interact()?;
+                Ok(Self::StartsWith(sw))
+            },
+            _ => unreachable!()
         }
     }
 }

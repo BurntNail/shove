@@ -131,10 +131,7 @@ pub async fn protect() -> color_eyre::Result<()> {
             existing_auth.save(&bucket).await?;
         }
         5 => {
-            let pat = Input::with_theme(&theme)
-                .with_prompt("Pattern to protect?")
-                .interact()?;
-            let pat = Realm::StartsWith(pat);
+            let pat = Realm::get_from_stdin(&theme)?;
 
             let uuids = {
                 let users = existing_auth.get_users();
@@ -164,22 +161,22 @@ pub async fn protect() -> color_eyre::Result<()> {
             existing_auth.save(&bucket).await?;
         }
         6 => {
-            let mut patterns: Vec<String> = existing_auth
+            let mut patterns: Vec<Realm> = existing_auth
                 .get_patterns_and_usernames()
                 .into_iter()
-                .map(|(pat, _)| format!("{pat:?}"))
+                .map(|(pat, _)| pat)
                 .collect();
             if patterns.is_empty() {
                 println!("No existing realms.");
                 return Ok(());
             }
 
-            let chosen_pat = Select::with_theme(&theme)
+            let pat = Select::with_theme(&theme)
                 .with_prompt("Which realm?")
                 .items(&patterns)
                 .interact()?;
 
-            let pat = Realm::StartsWith(patterns.swap_remove(chosen_pat));
+            let pat = patterns.swap_remove(pat);
 
             let uuids = {
                 let users = existing_auth.get_users();
