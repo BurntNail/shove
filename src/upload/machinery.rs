@@ -88,7 +88,7 @@ pub async fn upload_dir_to_bucket(dir: &str, bucket: &Bucket) -> color_eyre::Res
     }
 
     let UploadData {
-        root: _,
+        root,
         entries: existing_entries,
     } = get_upload_data(bucket).await?.unwrap_or_default();
 
@@ -102,24 +102,34 @@ pub async fn upload_dir_to_bucket(dir: &str, bucket: &Bucket) -> color_eyre::Res
     let mut to_write = vec![];
     let mut to_delete: HashSet<_> = existing_entries.keys().collect();
     let mut entries = HashMap::new();
-    while let Some(entry) = futures.next().await {
-        let entry = entry?;
 
-        to_delete.remove(&entry.path);
+    if dir == root {
+        while let Some(entry) = futures.next().await {
+            let entry = entry?;
 
-        match existing_entries.get(&entry.path) {
-            None => {
-                entries.insert(entry.path.clone(), entry.hash.clone());
-                to_write.push(entry);
-            }
-            Some(x) => {
-                entries.insert(entry.path.clone(), entry.hash.clone());
-                if x != &entry.hash {
+            to_delete.remove(&entry.path);
+
+            match existing_entries.get(&entry.path) {
+                None => {
+                    entries.insert(entry.path.clone(), entry.hash.clone());
                     to_write.push(entry);
-                } else {
-                    trace!(pb=?entry.path, "Skipping upload");
+                }
+                Some(x) => {
+                    entries.insert(entry.path.clone(), entry.hash.clone());
+                    if x != &entry.hash {
+                        to_write.push(entry);
+                    } else {
+                        trace!(pb=?entry.path, "Skipping upload");
+                    }
                 }
             }
+        }
+    } else {
+        while let Some(entry) = futures.next().await {
+            let entry = entry?;
+
+            entries.insert(entry.path.clone(), entry.hash.clone());
+            to_write.push(entry);
         }
     }
 
