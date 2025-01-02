@@ -6,13 +6,15 @@ use futures::{
 };
 use hyper::{body::Incoming, upgrade::Upgraded, Request};
 use hyper_util::rt::TokioIo;
-use soketto::{connection::Error as SokettoError, handshake::http::Server};
-use soketto::Incoming as WsIncoming;
-use std::sync::{Arc};
-use std::time::Duration;
-use soketto::data::ByteSlice125;
-use tokio::sync::mpsc::{channel, Sender};
-use tokio::sync::Mutex;
+use soketto::{
+    connection::Error as SokettoError, data::ByteSlice125, handshake::http::Server,
+    Incoming as WsIncoming,
+};
+use std::{sync::Arc, time::Duration};
+use tokio::sync::{
+    mpsc::{channel, Sender},
+    Mutex,
+};
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt};
 
 type WsSender = soketto::Sender<BufReader<BufWriter<Compat<TokioIo<Upgraded>>>>>;
@@ -38,15 +40,13 @@ impl LiveReloader {
                     }
                 }
 
-                async fn handle_tx_and_rx (tx: &mut WsSender, rx: &mut WsReceiver) -> bool {
+                async fn handle_tx_and_rx(tx: &mut WsSender, rx: &mut WsReceiver) -> bool {
                     //can't use b"" as that gives a const byte array, not a slice :(
                     const PING: &[u8] = "get pinged, loser".as_bytes();
 
                     //stupid struct doesn't implement copy OR clone
                     //https://github.com/paritytech/soketto/issues/118 ?
-                    let ping_msg = || {
-                        ByteSlice125::try_from(PING).unwrap()
-                    };
+                    let ping_msg = || ByteSlice125::try_from(PING).unwrap();
 
                     let mut needs_to_be_removed = false;
 
@@ -71,7 +71,6 @@ impl LiveReloader {
                         }
                     }
 
-
                     let mut output = vec![];
                     match rx.receive(&mut output).await {
                         Ok(incoming) => match incoming {
@@ -84,7 +83,7 @@ impl LiveReloader {
                                 }
                             }
                             WsIncoming::Closed(_reason) => needs_to_be_removed = true,
-                        }
+                        },
                         Err(e) => {
                             warn!(?e, "Error reading from WS");
                         }
@@ -94,15 +93,17 @@ impl LiveReloader {
                 }
 
                 let mut senders_and_receivers = dead_check_senders.lock().await;
-                let mut needs_to_be_removed: FuturesUnordered<_> = senders_and_receivers.iter_mut().enumerate().map(|(i, (tx, rx))| {
-                    async move {
+                let mut needs_to_be_removed: FuturesUnordered<_> = senders_and_receivers
+                    .iter_mut()
+                    .enumerate()
+                    .map(|(i, (tx, rx))| async move {
                         if handle_tx_and_rx(tx, rx).await {
                             Some(i)
                         } else {
                             None
                         }
-                    }
-                }).collect();
+                    })
+                    .collect();
 
                 let mut tbr = vec![];
                 //there's a better way to do this, but i can't find it :(
@@ -123,13 +124,12 @@ impl LiveReloader {
                 for i in tbr {
                     senders_and_receivers.remove(i);
                 }
-
             }
         });
 
         Self {
             senders,
-            stop_dead_check
+            stop_dead_check,
         }
     }
 
@@ -170,7 +170,10 @@ impl LiveReloader {
         };
 
         let senders = std::mem::take::<Vec<_>>(senders.as_mut());
-        let mut fo: FuturesUnordered<_> = senders.into_iter().map(|(sender, _)| reload(sender)).collect();
+        let mut fo: FuturesUnordered<_> = senders
+            .into_iter()
+            .map(|(sender, _)| reload(sender))
+            .collect();
 
         while let Some(res) = fo.next().await {
             if let Err(e) = res {
@@ -192,14 +195,16 @@ impl LiveReloader {
         let _ = self.stop_dead_check.send(()).await;
 
         let senders = std::mem::take::<Vec<_>>(self.senders.lock().await.as_mut());
-        let mut fo: FuturesUnordered<_> = senders.into_iter().map(|(sender, _)| stop(sender)).collect();
+        let mut fo: FuturesUnordered<_> = senders
+            .into_iter()
+            .map(|(sender, _)| stop(sender))
+            .collect();
 
         while let Some(res) = fo.next().await {
             if let Err(e) = res {
                 error!(?e, "Error closing sender");
             }
         }
-
 
         Ok(())
     }
