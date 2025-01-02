@@ -41,7 +41,7 @@ impl Service<Request<Incoming>> for ServeService {
 
                 match handshake_server.receive_request(&req) {
                     Ok(rsp) => {
-                        tokio::spawn(async move {
+                        tokio::task::spawn(async move {
                             if let Err(e) =
                                 livereload.handle_livereload(req, handshake_server).await
                             {

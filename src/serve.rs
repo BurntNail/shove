@@ -17,7 +17,7 @@ use tokio::{
 
 enum Reloader {
     Interval(JoinHandle<()>, MPSCSender<()>),
-    Waiting(LiveReloader),
+    Waiting,
 }
 
 pub fn empty_with_code(code: StatusCode) -> Result<Response<Full<Bytes>>, http::Error> {
@@ -25,7 +25,7 @@ pub fn empty_with_code(code: StatusCode) -> Result<Response<Full<Bytes>>, http::
 }
 
 //from https://github.com/tokio-rs/axum/blob/main/examples/graceful-shutdown/src/main.rs
-async fn shutdown_signal(reload_stop: Reloader) {
+async fn shutdown_signal(reload_stop: Reloader, live_reloader: LiveReloader) {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -55,11 +55,11 @@ async fn shutdown_signal(reload_stop: Reloader) {
                 error!(?e, "Error awaiting for reload thread handle");
             }
         }
-        Reloader::Waiting(livereload) => {
-            if let Err(e) = livereload.send_stop().await {
-                error!(?e, "Error stopping live reloader");
-            }
-        }
+        Reloader::Waiting => {}
+    }
+
+    if let Err(e) = live_reloader.send_stop().await {
+        error!(?e, "Error stopping live reloader");
     }
 }
 
@@ -94,11 +94,11 @@ pub async fn serve() -> color_eyre::Result<()> {
             send_stop,
         )
     } else {
-        Reloader::Waiting(state.live_reloader())
+        Reloader::Waiting
     };
 
     let http = http1::Builder::new();
-    let mut signal = std::pin::pin!(shutdown_signal(reload));
+    let mut signal = std::pin::pin!(shutdown_signal(reload, state.live_reloader()));
 
     let listener = TcpListener::bind(&addr).await?;
     info!(?addr, "Serving");
