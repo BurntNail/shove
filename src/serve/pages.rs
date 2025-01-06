@@ -8,12 +8,14 @@ use crate::{
 };
 use color_eyre::eyre::bail;
 use futures::{stream::FuturesUnordered, StreamExt};
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full};
 use hyper::{body::Bytes, header, http, Method, Response, StatusCode};
 use moka::future::{Cache, CacheBuilder};
 use s3::{error::S3Error, Bucket};
 use serde_json::from_slice;
 use std::{collections::HashSet, sync::Arc};
+use std::convert::Infallible;
+use http_body_util::combinators::BoxBody;
 use tokio::sync::{Mutex, RwLock};
 
 #[derive(Clone)]
@@ -173,9 +175,7 @@ impl Pages {
             }
 
             info!("Updated cache from S3");
-            if let Err(e) = reloader.send_reload().await {
-                error!(?e, "Error reloading tasks");
-            }
+            reloader.send_reload();
         });
 
         Ok(())
@@ -248,7 +248,7 @@ pub struct PageOutput {
 }
 
 impl PageOutput {
-    pub fn into_response(self, req_method: &Method) -> http::Result<Response<Full<Bytes>>> {
+    pub fn into_response(self, req_method: &Method) -> http::Result<Response<BoxBody<Bytes, Infallible>>> {
         let mut builder = Response::builder()
             .status(self.status)
             .header(header::CONTENT_TYPE, self.content_type)
@@ -260,9 +260,9 @@ impl PageOutput {
         }
 
         if req_method == Method::HEAD {
-            Ok(builder.body(Full::default())?)
+            Ok(builder.body(BodyExt::boxed(Full::default()))?)
         } else {
-            Ok(builder.body(Full::new(Bytes::from(self.content)))?)
+            Ok(builder.body(BodyExt::boxed(Full::new(Bytes::from(self.content))))?)
         }
     }
 }

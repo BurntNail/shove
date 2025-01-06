@@ -3,29 +3,32 @@ mod pages;
 mod service;
 mod state;
 
-use crate::serve::{livereload::LiveReloader, service::ServeService, state::State};
+use crate::serve::{service::ServeService, state::State};
 use http_body_util::Full;
 use hyper::{body::Bytes, http, server::conn::http1, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use std::{env::var, net::SocketAddr, time::Duration};
+use std::convert::Infallible;
+use http_body_util::combinators::BoxBody;
 use tokio::{
     net::TcpListener,
     signal,
     sync::mpsc::{channel, Sender as MPSCSender},
     task::{JoinHandle, JoinSet},
 };
+use http_body_util::BodyExt;
 
 enum Reloader {
     Interval(JoinHandle<()>, MPSCSender<()>),
     Waiting,
 }
 
-pub fn empty_with_code(code: StatusCode) -> Result<Response<Full<Bytes>>, http::Error> {
-    Response::builder().status(code).body(Full::default())
+pub fn empty_with_code(code: StatusCode) -> Result<Response<BoxBody<Bytes, Infallible>>, http::Error> {
+    Response::builder().status(code).body(BodyExt::boxed(Full::default()))
 }
 
 //from https://github.com/tokio-rs/axum/blob/main/examples/graceful-shutdown/src/main.rs
-async fn shutdown_signal(reload_stop: Reloader, live_reloader: LiveReloader) {
+async fn shutdown_signal(reload_stop: Reloader) {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -56,10 +59,6 @@ async fn shutdown_signal(reload_stop: Reloader, live_reloader: LiveReloader) {
             }
         }
         Reloader::Waiting => {}
-    }
-
-    if let Err(e) = live_reloader.send_stop().await {
-        error!(?e, "Error stopping live reloader");
     }
 }
 
@@ -98,7 +97,7 @@ pub async fn serve() -> color_eyre::Result<()> {
     };
 
     let http = http1::Builder::new();
-    let mut signal = std::pin::pin!(shutdown_signal(reload, state.live_reloader()));
+    let mut signal = std::pin::pin!(shutdown_signal(reload));
 
     let listener = TcpListener::bind(&addr).await?;
     info!(?addr, "Serving");

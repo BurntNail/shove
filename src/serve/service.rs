@@ -2,7 +2,7 @@ use crate::{
     protect::auth::AuthReturn,
     serve::{empty_with_code, state::State},
 };
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full};
 use hyper::{
     body::{Bytes, Incoming},
     http,
@@ -10,8 +10,9 @@ use hyper::{
     Method, Request, Response, StatusCode,
 };
 use path_clean::PathClean;
-use soketto::handshake::http::{is_upgrade_request, Server};
 use std::{future::Future, net::SocketAddr, path::Path, pin::Pin, sync::Arc};
+use std::convert::Infallible;
+use http_body_util::combinators::BoxBody;
 
 pub struct ServeService {
     state: State,
@@ -25,42 +26,20 @@ impl ServeService {
 }
 
 impl Service<Request<Incoming>> for ServeService {
-    type Response = Response<Full<Bytes>>;
+    type Response = Response<BoxBody<Bytes, Infallible>>;
     type Error = http::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
         let state = self.state.clone();
         let remote_addr = self.remote_ip;
-        let livereload = state.live_reloader();
 
         Box::pin(async move {
             //thx https://github.com/paritytech/soketto/blob/master/examples/hyper_server.rs
-            if is_upgrade_request(&req) {
-                let mut handshake_server = Server::new();
-
-                match handshake_server.receive_request(&req) {
-                    Ok(rsp) => {
-                        tokio::task::spawn(async move {
-                            if let Err(e) =
-                                livereload.handle_livereload(req, handshake_server).await
-                            {
-                                error!(?e, "Error with websockets");
-                            }
-                        });
-                        Ok(rsp.map(|()| Full::default()))
-                    }
-                    Err(e) => {
-                        error!(?e, "Couldn't upgrade connection");
-                        empty_with_code(StatusCode::INTERNAL_SERVER_ERROR)
-                    }
-                }
-            } else {
-                match *req.method() {
-                    Method::POST => serve_post(req, state).await,
-                    Method::GET | Method::HEAD => serve_get_head(req, state, remote_addr).await,
-                    _ => empty_with_code(StatusCode::METHOD_NOT_ALLOWED),
-                }
+            match *req.method() {
+                Method::POST => serve_post(req, state).await,
+                Method::GET | Method::HEAD => serve_get_head(req, state, remote_addr).await,
+                _ => empty_with_code(StatusCode::METHOD_NOT_ALLOWED),
             }
         })
     }
@@ -70,7 +49,7 @@ impl Service<Request<Incoming>> for ServeService {
 async fn serve_post(
     req: Request<Incoming>,
     state: State,
-) -> Result<Response<Full<Bytes>>, http::Error> {
+) -> Result<Response<BoxBody<Bytes, Infallible>>, http::Error> {
     match req.uri().path() {
         "/reload" => {
             let Some(actual_tigris_token) = state.tigris_token.clone() else {
@@ -121,10 +100,13 @@ async fn serve_get_head(
     req: Request<Incoming>,
     state: State,
     remote_addr: SocketAddr,
-) -> Result<Response<Full<Bytes>>, http::Error> {
+) -> Result<Response<BoxBody<Bytes, Infallible>>, http::Error> {
     let path = req.uri().path();
     if path == "/healthcheck" {
         return empty_with_code(StatusCode::OK);
+    }
+    if path == "/sse" {
+        return state.live_reloader().sse_stream();
     }
 
     let cleaned = Path::new(path).clean();
@@ -160,7 +142,7 @@ async fn serve_get_head(
         None => {
             let rsp = Response::builder()
                 .status(StatusCode::NOT_FOUND)
-                .body(Full::default())?;
+                .body(BodyExt::boxed(Full::default()))?;
 
             Ok(rsp)
         }

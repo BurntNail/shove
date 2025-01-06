@@ -10,7 +10,7 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use color_eyre::eyre::bail;
 use getrandom::getrandom;
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full};
 use hyper::{
     body::{Bytes, Incoming},
     http, Request, Response, StatusCode,
@@ -21,6 +21,8 @@ use std::{
     num::NonZeroU32,
     sync::{Arc, LazyLock},
 };
+use std::convert::Infallible;
+use http_body_util::combinators::BoxBody;
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
@@ -35,12 +37,12 @@ pub struct AuthChecker {
 
 pub enum AuthReturn {
     AuthConfirmed(Request<Incoming>),
-    ResponseFromAuth(Response<Full<Bytes>>),
+    ResponseFromAuth(Response<BoxBody<Bytes, Infallible>>),
     Error(http::Error),
 }
 
-impl From<Result<Response<Full<Bytes>>, http::Error>> for AuthReturn {
-    fn from(value: Result<Response<Full<Bytes>>, http::Error>) -> Self {
+impl From<Result<Response<BoxBody<Bytes, Infallible>>, http::Error>> for AuthReturn {
+    fn from(value: Result<Response<BoxBody<Bytes, Infallible>>, http::Error>) -> Self {
         match value {
             Ok(x) => Self::ResponseFromAuth(x),
             Err(e) => Self::Error(e),
@@ -154,7 +156,7 @@ impl AuthChecker {
                 format!("Basic realm=\"{path:?}\" charset=\"UTF-8\""),
             )
             .status(StatusCode::UNAUTHORIZED)
-            .body(Full::default())
+            .body(BodyExt::boxed(Full::default()))
             .into();
 
         let Some(users) = self.auth.read().await.find_users_with_access(path) else {
