@@ -10,11 +10,15 @@ Of course, there's plenty more features, including but not limited to:
 
 ## Commands
 
-`shove` has 3 commands: `upload`, `protect` and `serve` - the expected usecase is to `upload` a directory to a bucket, `protect` any relevant paths and then to `serve` it from a server.
+`shove` has 4 commands: `upload`, `protect`, `cache` and `serve` - the expected usecase is to `upload` a directory to a bucket, `protect` and `cache` any relevant paths and then to `serve` it from a server.
 
 `shove` uses environment variables for things like the S3 security keys, and the keys and their contents can be found with `shove --help`.
 
-## Live Reloading
+### Cache Control
+
+`shove cache` allows you to specify cache control headers on different paths.
+
+### Live Reloading
 
 If you re-run `shove upload` on the same directory, it'll check and only upload the new files. If you run `shove protect`, it'll happily change an actively running server
 
