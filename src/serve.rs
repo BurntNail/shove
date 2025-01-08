@@ -7,13 +7,18 @@ use crate::serve::{livereload::LiveReloader, service::ServeService, state::State
 use http_body_util::Full;
 use hyper::{body::Bytes, http, server::conn::http1, Response, StatusCode};
 use hyper_util::rt::TokioIo;
-use std::{env::var, net::SocketAddr, time::Duration};
+use std::{env::var, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{
     net::TcpListener,
     signal,
-    sync::mpsc::{channel, Sender as MPSCSender},
+    sync::{
+        mpsc::{channel, Sender as MPSCSender},
+        Semaphore,
+    },
     task::{JoinHandle, JoinSet},
 };
+
+const MAX_EXTERNAL_CONNS: usize = 512;
 
 enum Reloader {
     Interval(JoinHandle<()>, MPSCSender<()>),
@@ -99,6 +104,7 @@ pub async fn serve() -> color_eyre::Result<()> {
 
     let http = http1::Builder::new();
     let mut signal = std::pin::pin!(shutdown_signal(reload, state.live_reloader()));
+    let semaphore = Arc::new(Semaphore::new(MAX_EXTERNAL_CONNS));
 
     let listener = TcpListener::bind(&addr).await?;
     info!(?addr, "Serving");
@@ -109,7 +115,7 @@ pub async fn serve() -> color_eyre::Result<()> {
         tokio::select! {
             Ok((stream, remote_addr)) = listener.accept() => {
                 let io = TokioIo::new(stream);
-                let svc = ServeService::new(state.clone(), remote_addr);
+                let svc = ServeService::new(state.clone(), remote_addr, semaphore.clone());
 
                 let conn = http.serve_connection(io, svc).with_upgrades();
 

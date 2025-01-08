@@ -12,15 +12,21 @@ use hyper::{
 use path_clean::PathClean;
 use soketto::handshake::http::{is_upgrade_request, Server};
 use std::{future::Future, net::SocketAddr, path::Path, pin::Pin, sync::Arc};
+use tokio::sync::{Semaphore, TryAcquireError};
 
 pub struct ServeService {
     state: State,
     remote_ip: SocketAddr,
+    semaphore: Arc<Semaphore>,
 }
 
 impl ServeService {
-    pub fn new(state: State, remote_ip: SocketAddr) -> Self {
-        Self { state, remote_ip }
+    pub fn new(state: State, remote_ip: SocketAddr, semaphore: Arc<Semaphore>) -> Self {
+        Self {
+            state,
+            remote_ip,
+            semaphore,
+        }
     }
 }
 
@@ -33,8 +39,19 @@ impl Service<Request<Incoming>> for ServeService {
         let state = self.state.clone();
         let remote_addr = self.remote_ip;
         let livereload = state.live_reloader();
+        let semaphore = self.semaphore.clone();
 
         Box::pin(async move {
+            let permit = match semaphore.try_acquire_owned() {
+                Ok(p) => p,
+                Err(TryAcquireError::NoPermits) => {
+                    return empty_with_code(StatusCode::TOO_MANY_REQUESTS);
+                }
+                Err(TryAcquireError::Closed) => {
+                    return empty_with_code(StatusCode::SERVICE_UNAVAILABLE);
+                }
+            };
+
             //thx https://github.com/paritytech/soketto/blob/master/examples/hyper_server.rs
             if is_upgrade_request(&req) {
                 let mut handshake_server = Server::new();
@@ -47,6 +64,8 @@ impl Service<Request<Incoming>> for ServeService {
                             {
                                 error!(?e, "Error with websockets");
                             }
+                            //ensure permit is moved into the new thread
+                            drop(permit);
                         });
                         Ok(rsp.map(|()| Full::default()))
                     }
@@ -56,11 +75,12 @@ impl Service<Request<Incoming>> for ServeService {
                     }
                 }
             } else {
-                match *req.method() {
+                let rsp = match *req.method() {
                     Method::POST => serve_post(req, state).await,
                     Method::GET | Method::HEAD => serve_get_head(req, state, remote_addr).await,
                     _ => empty_with_code(StatusCode::METHOD_NOT_ALLOWED),
-                }
+                };
+                rsp
             }
         })
     }
