@@ -17,8 +17,8 @@ pub struct NonEmptyList<T> {
     _pd: PhantomData<T>,
 }
 
-unsafe impl<T> Send for NonEmptyList<T> {}
-unsafe impl<T> Sync for NonEmptyList<T> {}
+unsafe impl<T: Send + Sync> Send for NonEmptyList<T> {}
+unsafe impl<T: Send + Sync> Sync for NonEmptyList<T> {}
 
 impl<T> NonEmptyList<T> {
     pub fn new(list: Vec<T>) -> Option<Self> {
