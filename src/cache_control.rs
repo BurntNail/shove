@@ -44,7 +44,7 @@ pub async fn cache() -> color_eyre::Result<()> {
             println!("{table}");
         }
         1 => {
-            caching.default = get_zeroable_directives(&theme)?;
+            caching.default = get_any_number_of_directives(&theme)?;
             caching.save(&bucket).await?;
         }
         2 => {
@@ -60,7 +60,7 @@ pub async fn cache() -> color_eyre::Result<()> {
     Ok(())
 }
 
-fn get_zeroable_directives(
+fn get_any_number_of_directives(
     theme: &dyn Theme,
 ) -> color_eyre::Result<Option<NonEmptyList<Directive>>> {
     Ok(

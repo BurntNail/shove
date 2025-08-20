@@ -71,16 +71,12 @@ async fn serve_post(
     req: Request<Incoming>,
     state: State,
 ) -> Result<Response<Full<Bytes>>, http::Error> {
+    let Some(actual_tigris_token) = state.tigris_token.clone() else {
+        return empty_with_code(StatusCode::METHOD_NOT_ALLOWED);
+    };
+    
     match req.uri().path() {
         "/reload" => {
-            let Some(actual_tigris_token) = state.tigris_token.clone() else {
-                return empty_with_code(StatusCode::METHOD_NOT_ALLOWED);
-            };
-
-            if req.uri().path() != "/reload" {
-                return empty_with_code(StatusCode::NOT_FOUND);
-            }
-
             let headers = req.headers();
             let provided_auth_token = match headers.get("Authorization").cloned() {
                 Some(x) => match x.to_str() {
@@ -112,7 +108,7 @@ async fn serve_post(
                 empty_with_code(StatusCode::OK)
             }
         }
-        _ => empty_with_code(StatusCode::METHOD_NOT_ALLOWED),
+        _ => empty_with_code(StatusCode::NOT_FOUND),
     }
 }
 
@@ -135,18 +131,16 @@ async fn serve_get_head(
             return empty_with_code(StatusCode::BAD_REQUEST);
         }
     };
-
+    
     if cleaned.extension().is_none_or(|x| x.is_empty()) {
         //ensure that we don't miss zero-index fun
         #[allow(clippy::if_same_then_else)]
-        if path.is_empty() {
-            path.push('/');
-        } else if path.as_bytes()[path.as_bytes().len() - 1] != b'/' {
+        if path.chars().last().is_none() {
             path.push('/');
         }
         path.push_str("index.html");
     }
-
+    
     let req = match state.check_auth(&path, req, remote_addr).await {
         AuthReturn::AuthConfirmed(req) => req,
         AuthReturn::ResponseFromAuth(rsp) => return Ok(rsp),
@@ -156,13 +150,9 @@ async fn serve_get_head(
     trace!(?path, "Serving");
 
     match state.get(&path).await {
-        Some(po) => po.into_response(req.method()),
+        Some(page_output) => page_output.into_response(req.method()),
         None => {
-            let rsp = Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Full::default())?;
-
-            Ok(rsp)
+            empty_with_code(StatusCode::NOT_FOUND)
         }
     }
 }

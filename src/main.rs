@@ -115,11 +115,10 @@ impl PartialEq for Realm {
             (Realm::StartsWith(s), Realm::StartsWith(o)) => s.eq(o),
             (Realm::EndsWith(s), Realm::EndsWith(o)) => s.eq(o),
             //technically not comprehensive but i'm not dealing with that mess lolll
-            //also that would break the hash/partialeq invariant
+            //also that would break the hash/partialeq invariant if we dealt with output-identical regexes
             (Realm::Regex(s), Realm::Regex(o)) => s.as_str().eq(o.as_str()),
             (Realm::Contains(s), Realm::Contains(o)) => s.eq(o),
-            //could technically turn the sw/ew into a regex, but again, no
-            //that'd also break the hash/partialeq invariant
+            //could technically turn the sw/ew into a regex, but no :)
             (_, _) => false,
         }
     }
@@ -134,7 +133,9 @@ pub struct UploadData {
     pub root: String,
 }
 
-pub fn setup() {
+/// # Safety
+/// Must only be called in a single-threaded environment
+pub unsafe fn setup() {
     if cfg!(debug_assertions) {
         for (key, value) in &[
             ("RUST_SPANTRACE", "full"),
@@ -145,7 +146,10 @@ pub fn setup() {
             match std::env::var(key) {
                 Err(_) => {
                     trace!(%key, %value, "Setting env var");
-                    std::env::set_var(key, value);
+                    unsafe {
+                        //safety: method safety notes ensure only single threaded
+                        std::env::set_var(key, value);
+                    }
                 }
                 Ok(found) => {
                     trace!(%key, %found, "Found existing env var");
@@ -286,8 +290,13 @@ impl Args {
 }
 
 fn main() {
+    //SAFETY: only one thread r/w at this point
+    unsafe {
+        setup();
+    }
+    
     let args = Args::parse();
-    setup();
+    
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

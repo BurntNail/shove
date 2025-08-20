@@ -80,13 +80,15 @@ impl<T> NonEmptyList<T> {
 
         let mut list = ManuallyDrop::new(list);
 
-        debug_assert!(list.len() > 0);
+        debug_assert!(!list.is_empty());
         debug_assert!(list.capacity() > 0);
 
         //safety: we know the list isn't empty so the capacity and length are >0, and the pointer is not null
-        let len = NonZeroUsize::new_unchecked(list.len());
-        let cap = NonZeroUsize::new_unchecked(list.capacity());
-        let ptr = NonNull::new_unchecked(list.as_mut_ptr());
+        let (len, cap, ptr) = unsafe {
+            (NonZeroUsize::new_unchecked(list.len()),
+                NonZeroUsize::new_unchecked(list.capacity()),
+                NonNull::new_unchecked(list.as_mut_ptr()))
+        };
 
         Self {
             len,

@@ -46,6 +46,7 @@ impl LiveReloader {
 
                     //stupid struct doesn't implement copy OR clone
                     //https://github.com/paritytech/soketto/issues/118 ?
+                    //(got merged, but not yet released smh)
                     let ping_msg = || ByteSlice125::try_from(PING).unwrap();
 
                     let mut needs_to_be_removed = false;
@@ -117,6 +118,7 @@ impl LiveReloader {
 
                 let senders_left = senders_and_receivers.len() - tbr.len();
                 info!(removed=%tbr.len(), %senders_left, "removing dead senders");
+                
                 //yes, there's probably a performance penalty, but really?
                 //like this is so easy to read
                 tbr.sort();

@@ -25,6 +25,18 @@ use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
 pub const AUTH_DATA_LOCATION: &str = "authdata";
+static FAKE_PASSWORD: LazyLock<String> = LazyLock::new(|| {
+    const FAKE_PASSWORD_ACTUAL: &str = "thisismyfakepasswordtoreducesidechannelattackswhereyoumightbeabletoworkoutwhetheryourusernamewasanactualusernameforthisrealm";
+    let mut salt = [0; 32];
+    getrandom(&mut salt).expect("unable to get salt for fake password");
+    let saltstring =
+        SaltString::encode_b64(&salt).expect("unable to encode salt for fake password");
+
+    let hashed = Argon2::default()
+        .hash_password(FAKE_PASSWORD_ACTUAL.as_bytes(), &saltstring)
+        .expect("unable to hash fake password");
+    hashed.serialize().to_string()
+});
 
 #[derive(Clone)]
 pub struct AuthChecker {
@@ -56,6 +68,10 @@ impl AuthChecker {
         let rate_limiter = Arc::new(RateLimiter::keyed(Quota::per_minute(
             NonZeroU32::new(10).unwrap(),
         )));
+        
+        tokio::task::spawn_blocking(|| {
+            LazyLock::force(&FAKE_PASSWORD);
+        });
 
         Ok(Self {
             auth: Arc::new(RwLock::new(auth_storer)),
@@ -135,20 +151,8 @@ impl AuthChecker {
         req: Request<Incoming>,
         remote_addr: SocketAddr,
     ) -> AuthReturn {
-        static FAKE_PASSWORD: LazyLock<String> = LazyLock::new(|| {
-            const FAKE_PASSWORD_ACTUAL: &str = "thisismyfakepasswordtoreducesidechannelattackswhereyoumightbeabletoworkoutwhetheryourusernamewasanactualusernameforthisrealm";
-            let mut salt = [0; 32];
-            getrandom(&mut salt).expect("unable to get salt for fake password");
-            let saltstring =
-                SaltString::encode_b64(&salt).expect("unable to encode salt for fake password");
-
-            let hashed = Argon2::default()
-                .hash_password(FAKE_PASSWORD_ACTUAL.as_bytes(), &saltstring)
-                .expect("unable to hash fake password");
-            hashed.serialize().to_string()
-        });
-
-        let failed_auth_rsp = Response::builder()
+        //closure so it isn't generated for the happy paths
+        let failed_auth_rsp = || Response::builder()
             .header(
                 "WWW-Authenticate",
                 format!("Basic realm=\"{path:?}\" charset=\"UTF-8\""),
@@ -173,16 +177,17 @@ impl AuthChecker {
                     Some(x) => x.to_string(),
                     None => {
                         debug!("Unable to find Basic part");
-                        return failed_auth_rsp;
+                        return failed_auth_rsp();
                     }
                 },
                 Err(e) => {
                     debug!(?e, "Error converting auth part to string");
-                    return failed_auth_rsp;
+                    return failed_auth_rsp();
                 }
             },
             None => {
-                return failed_auth_rsp;
+                debug!("Unable to find Authorization part");
+                return failed_auth_rsp();
             }
         };
 
@@ -219,7 +224,7 @@ impl AuthChecker {
             };
             let _ = Argon2::default()
                 .verify_password(provided_password.as_bytes(), &fake_password_hash);
-            return failed_auth_rsp;
+            return failed_auth_rsp();
         };
 
         let password_hash = match PasswordHash::new(stored_key) {
@@ -244,7 +249,7 @@ impl AuthChecker {
             AuthReturn::AuthConfirmed(req)
         } else {
             debug!("Passwords didn't match for auth");
-            failed_auth_rsp
+            failed_auth_rsp()
         }
     }
 }

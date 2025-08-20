@@ -4,7 +4,7 @@
 #
 
 app = 'katashift'
-primary_region = 'sin'
+primary_region = 'lhr'
 
 [build]
 
