@@ -152,14 +152,18 @@ async fn serve_get_head(
         }
     };
     
+    debug!(?path, "maybe serving");    
+    
     if cleaned.extension().is_none_or(|x| x.is_empty()) {
         //ensure that we don't miss zero-index fun
         #[allow(clippy::if_same_then_else)]
-        if path.chars().last().is_none() {
+        if path.chars().last().is_none_or(|ch| ch != '/') {
             path.push('/');
         }
         path.push_str("index.html");
     }
+    
+    debug!(?path, "yeppers serving");
     
     let req = match state.check_auth(&path, req, remote_addr).await {
         AuthReturn::AuthConfirmed(req) => req,
