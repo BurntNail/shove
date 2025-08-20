@@ -34,7 +34,7 @@ impl LiveReloader {
         tokio::task::spawn(async move {
             loop {
                 tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                    _ = tokio::time::sleep(Duration::from_secs(60)) => {}
                     _ = stop_rx.recv() => {
                         break;
                     }
